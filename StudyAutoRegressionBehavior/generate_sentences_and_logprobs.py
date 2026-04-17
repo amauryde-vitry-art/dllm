@@ -129,13 +129,13 @@ def get_generated_sentence_and_logprobs(model, tokenizer, prompt, prompt_lens, p
         
                 words_list = [tokenizer.decode(t).strip() for t in tokens_block] # type: ignore
                 words_list_history = [tokenizer.decode(t).strip() for t in token_bloc_history] # type: ignore
-                
+                current_words_list = [tokenizer.decode(t).strip() for t in x[j][init_block_mask[j]]] # type: ignore
 
                 levenshtein_distances = [distance(word1, word2) for word1, word2 in zip(words_list, words_list_history)]
 
                 start_idx = block_start[j].item()
                 end_idx = block_end[j].item()
-                res_list[j][num_block][i] = (words_list, current_block_probs, block_mask_history[j][start_idx:end_idx], changes[j][start_idx:end_idx], semantic_distance_j, levenshtein_distances)
+                res_list[j][num_block][i] = (current_words_list, current_block_probs, block_mask_history[j][start_idx:end_idx], changes[j][start_idx:end_idx], semantic_distance_j, levenshtein_distances)
             
             history_generated.append(x0.clone())
 

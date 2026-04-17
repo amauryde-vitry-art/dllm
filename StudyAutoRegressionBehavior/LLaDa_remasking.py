@@ -1,7 +1,7 @@
 import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForMaskedLM, AutoModel
-from generate_sentences_and_logprobs import concat_changes, concat_levenshtein, concat_semantic, get_generated_sentence_and_logprobs, concat_lp, concat_mask, concat_text
+from StudyAutoRegressionBehavior.generate_sentences_and_logprobs_uniforme_remasking import concat_changes, concat_levenshtein, concat_semantic, concat_text_masked, get_generated_sentence_and_logprobs, concat_lp, concat_mask, concat_text
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import seaborn as sns
@@ -9,7 +9,7 @@ import numpy as np
 from dataclasses import dataclass
 import transformers
 
-os.makedirs('LLaDa_figures', exist_ok=True)
+os.makedirs('LLaDa_figures_uniforme_remasking', exist_ok=True)
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -67,16 +67,32 @@ for j in range(len(results)):
     res_changes_cumulative = np.cumsum(np.array(res_changes), axis=0)
     res_semantic_distance = concat_semantic(results[j])
     res_levenshtein_distance = concat_levenshtein(results[j])
+    res_masked_text = concat_text_masked(results[j])
 
-    print(len(res_semantic_distance), len(res_semantic_distance[0]))
-    print(np.sum([res_changes[j][50] for j in range(len(res_changes))]))
+   
+    filename = f"LLaDa_figures_uniforme_remasking/generated_text_batch_{j}.txt"
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(f'==================== MESSAGE {j} ====================\n')
+        for r in sorted(results[j].keys()):
+            f.write(f'------------- BLOCK {r} -------------\n')
+            
+            for k in sorted(results[j][r].keys()):
+                masked_words = results[j][r][k][-1]
+                words = results[j][r][k][0]
+                f.write(f'Step {k}:\n')
+                f.write(f'Masked text: {masked_words}\n')
+                f.write(f'Generated text: {words}\n')
+                
+        f.write('\n\n')
+        f.write(f'Final sentence: {" ".join(res_text[-1])}\n')
 
+        
 
     plt.figure(figsize=(15, 6))
     sns.heatmap(res, cmap = 'viridis')
     plt.ylabel('Diffusion iterations')
     plt.xlabel('Word index')
-    plt.title('Convergence of LogProbs: Diff. iterations VS Index (LLaDA)')
+    plt.title('Convergence of LogProbs: Diff. iterations VS Index (LLaDA uniforme remasking)')
     for i in range(5):
         if i == 0:
             plt.axvline(64*i, linewidth=4, color='red', linestyle='--', label='Block size')
@@ -85,7 +101,7 @@ for j in range(len(results)):
 
     plt.legend()
     print('Final sentence:', " ".join(res_text[-1]))
-    plt.savefig(f'LLaDa_figures/logprobs_convergence_LLaDa_{j}.png')
+    plt.savefig(f'LLaDa_figures_uniforme_remasking/logprobs_convergence_LLaDa_{j}.png')
     plt.show()
 
     plt.figure(figsize=(15, 6))
@@ -97,20 +113,20 @@ for j in range(len(results)):
             plt.axvline(64*i, linewidth=4, color='red', linestyle='--')
     plt.ylabel('Diffusion iterations')
     plt.xlabel('Word index')
-    plt.title('Evolution of masks across diffusion (LLaDA)')
+    plt.title('Evolution of masks across diffusion (LLaDA uniforme remasking)')
     mask_handles = [
-        Patch(facecolor='black', edgecolor='black', label='mask True'),
-        Patch(facecolor='white', edgecolor='black', label='mask False'),
+        Patch(facecolor='black', edgecolor='black', label='mask False'),
+        Patch(facecolor='white', edgecolor='black', label='mask True'),
     ]
     plt.legend(handles=mask_handles + plt.gca().get_legend_handles_labels()[0])
-    plt.savefig(f'LLaDa_figures/mask_evolution_LLaDa_{j}.png')
+    plt.savefig(f'LLaDa_figures_uniforme_remasking/mask_evolution_LLaDa_{j}.png')
     plt.show()
 
     plt.figure(figsize=(15, 6))
     plt.imshow(res_changes, vmin=0, vmax=1, cmap='gray')
     plt.ylabel('Diffusion iterations')
     plt.xlabel('Word index')
-    plt.title('Changes of words between two steps of diffusion (LLaDA)')
+    plt.title('Changes of words between two steps of diffusion  (LLaDA uniforme remasking)')
     for i in range(5):
         if i == 0:
             plt.axvline(64*i, linewidth=4, color='red', linestyle='--', label='Block size')
@@ -121,21 +137,21 @@ for j in range(len(results)):
         Patch(facecolor='black', edgecolor='black', label='change False'),
     ]
     plt.legend(handles=mask_handles + plt.gca().get_legend_handles_labels()[0])
-    plt.savefig(f'LLaDa_figures/logprobs_changes_LLaDa_{j}.png')
+    plt.savefig(f'LLaDa_figures_uniforme_remasking/logprobs_changes_LLaDa_{j}.png')
     plt.show()
 
     plt.figure(figsize=(15, 6))
     sns.heatmap(res_changes_cumulative, cmap='viridis', vmin=0, vmax=np.max(res_changes_cumulative))
     plt.ylabel('Diffusion iterations')
     plt.xlabel('Word index')
-    plt.title('Cumulative changes in logprobs across diffusion (LLaDA)')
+    plt.title('Cumulative changes in logprobs across diffusion (LLaDA uniforme remasking)')
     for i in range(5):
         if i == 0:
             plt.axvline(64*i, linewidth=4, color='red', linestyle='--', label='Block size')
         else:
             plt.axvline(64*i, linewidth=4, color='red', linestyle='--')
     plt.legend()
-    plt.savefig(f'LLaDa_figures/logprobs_cumulative_changes_LLaDa_{j}.png')
+    plt.savefig(f'LLaDa_figures_uniforme_remasking/logprobs_cumulative_changes_LLaDa_{j}.png')
     plt.show()
 
 
@@ -146,10 +162,10 @@ for j in range(len(results)):
             plt.plot(L, label=f'Word index {i}')
     plt.ylabel('Semantic Distance')
     plt.xlabel('Diffusion iterations')
-    plt.title('Semantic distance across diffusion (LLaDA, by non decreasing word index order)')
+    plt.title('Semantic distance across diffusion (LLaDA uniforme remasking)')
     plt.grid()
     plt.legend()
-    plt.savefig(f'LLaDa_figures/semantic_distance_LLaDa_{j}.png')
+    plt.savefig(f'LLaDa_figures_uniforme_remasking/semantic_distance_LLaDa_{j}.png')
     plt.show()
 
 
@@ -160,10 +176,10 @@ for j in range(len(results)):
             plt.plot(L, label=f'Word index {i}')
     plt.ylabel('Levenshtein Distance')
     plt.xlabel('Diffusion iterations')
-    plt.title('Levenshtein distance across diffusion (LLaDA)')
+    plt.title('Levenshtein distance across diffusion (LLaDA uniforme remasking)')
     plt.grid()
     plt.legend()
-    plt.savefig(f'LLaDa_figures/levenshtein_distance_LLaDa_{j}.png')
+    plt.savefig(f'LLaDa_figures_uniforme_remasking/levenshtein_distance_LLaDa_{j}.png')
     plt.show()
 
     plt.figure(figsize=(15, 6))
@@ -175,10 +191,10 @@ for j in range(len(results)):
             plt.axvline(64*i, linewidth=4, color='red', linestyle='--')
     plt.ylabel('Diffusion iterations')
     plt.xlabel('Word index order')
-    plt.title('Levenshtein distance: Diffusion VS word index order (LLaDA)')
+    plt.title('Levenshtein distance: Diffusion VS word index order (LLaDA uniforme remasking)')
     plt.grid()
     plt.legend()
-    plt.savefig(f'LLaDa_figures/heatmap_levenshtein_distance_LLaDa_{j}.png')
+    plt.savefig(f'LLaDa_figures_uniforme_remasking/heatmap_levenshtein_distance_LLaDa_{j}.png')
     plt.show()
 
 
