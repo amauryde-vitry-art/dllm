@@ -1,7 +1,7 @@
 import os
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForMaskedLM, AutoModel
-from StudyAutoRegressionBehavior.generate_sentences_and_logprobs_uniforme_remasking import concat_changes, concat_levenshtein, concat_semantic, concat_text_masked, get_generated_sentence_and_logprobs, concat_lp, concat_mask, concat_text
+from generate_sentences_and_logprobs_uniforme_remasking import concat_changes, concat_levenshtein, concat_semantic, concat_text_masked, get_generated_sentence_and_logprobs, concat_lp, concat_mask, concat_text
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 import seaborn as sns
@@ -25,15 +25,16 @@ pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id or tokenizer.mask_toke
 
 
 messages = [
-    [
-        {"role": "system", "content": "You are a helpful AI assistant."},
-        {"role": "user", "content": "Implement a BFS traversal in Python with clear inline comments."},
-    ],
-    [
-        {"role": "system", "content": "You are a helpful AI assistant."},
-        {"role": "user", "content": "Write a concise pytest that checks a Fibonacci implementation. "},
-    ],
+    # 1. CODE : Test de la logique et de la syntaxe
+    [{"role": "user", "content": "Écris une fonction Python nommée `fibonacci` qui génère les n premiers nombres de la suite. Inclut des commentaires ligne par ligne et un exemple d'utilisation."}],
+    
+    # 2. CULTURE G : Test de précision factuelle (Noms, dates, lieux)
+    [{"role": "user", "content": "Explique brièvement ce qu'était la Révolution industrielle, en citant sa période de début, le pays où elle a commencé et deux inventions majeures de cette époque."}],
+    
+    # 3. HISTOIRE : Test de créativité et de cohérence narrative (longue traîne)
+    [{"role": "user", "content": "Raconte une histoire courte (environ 100 mots) sur un astronaute qui découvre une bibliothèque ancienne sur une planète déserte. Le ton doit être mystérieux et la fin surprenante."}]
 ]
+
 
 encoded = [
     tokenizer.apply_chat_template(m, add_generation_prompt=True, tokenize=True) 
@@ -51,10 +52,10 @@ for i, ids in enumerate(encoded):
 
 prompt_tensor = prompt_tensor.to(device)
 prompt_lens = prompt_lens.to(device)
-max_new_tokens = 256
+max_new_tokens = 128
 
 results = get_generated_sentence_and_logprobs(
-    model,tokenizer, prompt_tensor, prompt_lens, pad_id=pad_id, steps=256, max_new_tokens=max_new_tokens, block_size=64, 
+    model,tokenizer, prompt_tensor, prompt_lens, pad_id=pad_id, steps=128, max_new_tokens=max_new_tokens, block_size=32, 
 )
 
 
@@ -95,9 +96,9 @@ for j in range(len(results)):
     plt.title('Convergence of LogProbs: Diff. iterations VS Index (LLaDA uniforme remasking)')
     for i in range(5):
         if i == 0:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--', label='Block size')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--', label='Block size')
         else:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--')
 
     plt.legend()
     print('Final sentence:', " ".join(res_text[-1]))
@@ -108,9 +109,9 @@ for j in range(len(results)):
     plt.imshow(res_mask, vmin=0, vmax=1, cmap='gray')
     for i in range(5):
         if i == 0:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--', label='Block size')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--', label='Block size')
         else:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--')
     plt.ylabel('Diffusion iterations')
     plt.xlabel('Word index')
     plt.title('Evolution of masks across diffusion (LLaDA uniforme remasking)')
@@ -129,9 +130,9 @@ for j in range(len(results)):
     plt.title('Changes of words between two steps of diffusion  (LLaDA uniforme remasking)')
     for i in range(5):
         if i == 0:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--', label='Block size')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--', label='Block size')
         else:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--')
     mask_handles = [
         Patch(facecolor='white', edgecolor='black', label='change True'),
         Patch(facecolor='black', edgecolor='black', label='change False'),
@@ -147,9 +148,9 @@ for j in range(len(results)):
     plt.title('Cumulative changes in logprobs across diffusion (LLaDA uniforme remasking)')
     for i in range(5):
         if i == 0:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--', label='Block size')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--', label='Block size')
         else:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--')
     plt.legend()
     plt.savefig(f'LLaDa_figures_uniforme_remasking/logprobs_cumulative_changes_LLaDa_{j}.png')
     plt.show()
@@ -186,9 +187,9 @@ for j in range(len(results)):
     sns.heatmap(res_levenshtein_distance, cmap='viridis', vmin=0, vmax=np.max(res_levenshtein_distance))
     for i in range(5):
         if i == 0:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--', label='Block size')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--', label='Block size')
         else:
-            plt.axvline(64*i, linewidth=4, color='red', linestyle='--')
+            plt.axvline(32*i, linewidth=4, color='red', linestyle='--')
     plt.ylabel('Diffusion iterations')
     plt.xlabel('Word index order')
     plt.title('Levenshtein distance: Diffusion VS word index order (LLaDA uniforme remasking)')

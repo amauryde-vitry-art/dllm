@@ -7,22 +7,17 @@ from dataclasses import dataclass
 import transformers
 
 import dllm
-import dllm
 
 
 
-
-
-
-
-def CreateBaseSampleWithHistory(messages: list[list[dict[str, str]]], config: SamplerConfig, Script:ScriptArguments) -> dllm.core.samplers.BaseSamplerOutputCompleteHistory:
+def CreateBaseSampleWithHistory(messages: list[list[dict[str, str]]], config, Script):
     parser = transformers.HfArgumentParser((Script, config))
     script_args, sampler_config = parser.parse_args_into_dataclasses()
     transformers.set_seed(script_args.seed)
 
     model = dllm.utils.get_model(model_args=script_args).eval()
     tokenizer = dllm.utils.get_tokenizer(model_args=script_args)
-    sampler = dllm.core.samplers.MDLMSamplerWithCompleteHistory(model=model, tokenizer=tokenizer)
+    sampler = dllm.core.samplers.MDLMSamplerRemaskingWithCompleteHistory(model=model, tokenizer=tokenizer)
     terminal_visualizer = dllm.utils.TerminalVisualizer(tokenizer=tokenizer)
     inputs = tokenizer.apply_chat_template(
     messages,
@@ -34,14 +29,13 @@ def CreateBaseSampleWithHistory(messages: list[list[dict[str, str]]], config: Sa
     sequences = dllm.utils.sample_trim(tokenizer, outputs.sequences.tolist(), inputs)
     
 
-    print(sequences)
-    print('-----------------------')
-    print(dllm.utils.sample_trim(tokenizer, outputs.histories_x[-1].tolist(), inputs))
+    
 
     if script_args.visualize:
         terminal_visualizer.visualize(outputs.histories_x, rich=True)
     
-    return outputs
+
+    return outputs, tokenizer
 
 
 
