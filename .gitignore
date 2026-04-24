@@ -8,3 +8,31 @@ wheels/
 
 # Virtual environments
 .venv
+
+# files results 
+*.html
+*.csv
+*.json
+*.png
+*.text
+
+# Study directories
+StudyAutoRegressionBehavior/Dream/
+StudyAutoRegressionBehavior/LLaDA2/
+StudyAutoRegressionBehavior/LLaDa/
+StudyAutoRegressionBehavior/LLaDa_1Block/
+StudyAutoRegressionBehavior/LLaDa_figures/
+StudyAutoRegressionBehavior/LLaDa_figures_uniforme_remasking/
+StudyAutoRegressionBehavior/LLaDa_figures_uniforme_remasking_demo/
+StudyAutoRegressionBehavior/LLaDa_test_remasking/
+StudyAutoRegressionBehavior/LargeBERT/
+StudyAutoRegressionBehavior/ModernBERT/
+StudyAutoRegressionBehavior/Qwen_MDLM/
+StudyAutoRegressionBehavior/a2d/
+StudyAutoRegressionBehavior/qwen3MDML/
+StudyAutoRegressionBehavior/qwen_figures_demo/
+StudyAutoRegressionBehavior/qwen_figures_uniforme_remasking_demo/
+dllm/
+
+
+
