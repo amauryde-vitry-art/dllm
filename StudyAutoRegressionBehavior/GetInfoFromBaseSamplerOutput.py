@@ -111,5 +111,20 @@ def getLevenshtein(Proposed_sequences):
         
     return res_levenshtein
 
+def getH(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory):
+    nb_examples = outputs.histories_H[0].shape[0]
+    res_H =[]
+    for i in range(nb_examples):
+        res_H.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_H]) 
+    return res_H
+
+
+def getNumTransferTokens(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory):
+    nb_examples = outputs.histories_num_transfer_tokens[0].shape[0]
+    res_num_transfer_tokens =[]
+    for i in range(nb_examples):
+        res_num_transfer_tokens.append([e[i].detach().float().cpu().numpy() for e in outputs.histories_num_transfer_tokens]) 
+    return res_num_transfer_tokens
+
 
 

@@ -1,9 +1,9 @@
 from GenerateWithMDLMSampler import CreateBaseSampleWithHistory
 import dllm
 from dataclasses import dataclass
-from GetInfoFromBaseSamplerOutput import getLogProbs, getEachStepGeneratedSequence, getEachStepProposedSequence, getEachStepMask, getEachStepChange, getLevenshtein, getUnmaskLogProbs
-from PlotResults import plotLogProbs, plotMasks, plotChanges, plotLevenshtein, plotAttentionMask, plotUnmaskLogProbs, PlotlyLogProbs, PlotlyUnmaskLogProbs, PlotlyChanges , getTxt
-
+from GetInfoFromBaseSamplerOutput import getH, getLogProbs, getEachStepGeneratedSequence, getEachStepProposedSequence, getEachStepMask, getEachStepChange, getLevenshtein, getNumTransferTokens, getUnmaskLogProbs
+from PlotResults import PlotlyH, plotH, plotLogProbs, plotMasks, plotChanges, plotLevenshtein, plotAttentionMask, plotNumTransferredTokens, plotUnmaskLogProbs, PlotlyLogProbs, PlotlyUnmaskLogProbs, PlotlyChanges , getTxt
+from run_experiments import run_experiment_MDML, run_experiment_MDML_remasking
 
 import sys
 sys.argv = [sys.argv[0]] # Cette ligne "vide" les arguments du terminal
@@ -19,15 +19,17 @@ class SamplerConfig(dllm.core.samplers.MDLMSamplerConfig):
     remasking: str = "low_confidence"
 
 
+
+
 messages = [
     # 1. CODE : Test de la logique et de la syntaxe
-    [{"role": "user", "content": "Écris une fonction Python nommée `fibonacci` qui génère les n premiers nombres de la suite. Inclut des commentaires ligne par ligne et un exemple d'utilisation."}],
+    [{"role": "user", "content": "Write a Python script for Fibonacci sequence."}],
     
     # 2. CULTURE G : Test de précision factuelle (Noms, dates, lieux)
-    [{"role": "user", "content": "Explique brièvement ce qu'était la Révolution industrielle, en citant sa période de début, le pays où elle a commencé et deux inventions majeures de cette époque."}],
+    [{"role": "user", "content": "Which city is the capital of Australia?"}],
     
     # 3. HISTOIRE : Test de créativité et de cohérence narrative (longue traîne)
-    [{"role": "user", "content": "Raconte une histoire courte (environ 100 mots) sur un astronaute qui découvre une bibliothèque ancienne sur une planète déserte. Le ton doit être mystérieux et la fin surprenante."}]
+    [{"role": "user", "content": "Write a short story about an astronaut"}]
 ]
 
 
@@ -91,52 +93,91 @@ MODELS_TO_TEST = [
 
 ]
 
-def run_experiment(model_cfg, messages):
-    @dataclass
-    class ScriptArguments:
-        model_name_or_path: str = model_cfg['path']
-        seed: int = 42
-        visualize: bool = False
+# def run_experiment(model_cfg, messages):
+#     @dataclass
+#     class ScriptArguments:
+#         model_name_or_path: str = model_cfg['path']
+#         seed: int = 42
+#         visualize: bool = False
 
-        def __post_init__(self):
-            self.model_name_or_path = dllm.utils.resolve_with_base_env(
-                self.model_name_or_path, "BASE_MODELS_DIR"
-            )
+#         def __post_init__(self):
+#             self.model_name_or_path = dllm.utils.resolve_with_base_env(
+#                 self.model_name_or_path, "BASE_MODELS_DIR"
+#             )
 
-    outputs, tokenizer = CreateBaseSampleWithHistory(messages, SamplerConfig, ScriptArguments)
-    logprobs = getLogProbs(outputs)
-    masks = getEachStepMask(outputs)
-    remasks = getEachStepMask(outputs, remask=True)
-    Generated_sequences = getEachStepGeneratedSequence(outputs, tokenizer)
-    Proposed_sequences = getEachStepProposedSequence(outputs, tokenizer)
-    changes = getEachStepChange(outputs)
-    levenshtein = getLevenshtein(Proposed_sequences)
-    unmaskLogProbs = getUnmaskLogProbs(outputs)
+    # outputs, tokenizer = CreateBaseSampleWithHistory(messages, SamplerConfig, ScriptArguments)
+    # logprobs = getLogProbs(outputs)
+    # masks = getEachStepMask(outputs)
+    # # remasks = getEachStepMask(outputs, remask=True)
+    # Generated_sequences = getEachStepGeneratedSequence(outputs, tokenizer)
+    # Proposed_sequences = getEachStepProposedSequence(outputs, tokenizer)
+    # changes = getEachStepChange(outputs)
+    # levenshtein = getLevenshtein(Proposed_sequences)
+    # unmaskLogProbs = getUnmaskLogProbs(outputs)
+    # attention_masks = outputs.attention_mask.detach().cpu().numpy()
+    # # H = getH(outputs)
 
-    attention_masks = outputs.attention_mask.detach().cpu().numpy()
+
+    # getTxt(Proposed_sequences, model_cfg['dir'])
+    # getTxt(Generated_sequences, model_cfg['dir'], proposed_sequence=False)
+
+    # plotLogProbs(logprobs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks,)
+    # plotMasks(masks, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, remasking=False)
+    # # plotMasks(remasks, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, remasking=True)
+    # plotChanges(changes, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences)
+    # plotUnmaskLogProbs(unmaskLogProbs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks,)
+    # plotLevenshtein(levenshtein, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences)
+    # plotAttentionMask(attention_masks, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], )
+    # # plotH(H, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
 
 
-    getTxt(Proposed_sequences, model_cfg['dir'])
-    getTxt(Generated_sequences, model_cfg['dir'], proposed_sequence=False)
+    # PlotlyLogProbs(logprobs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Proposed_sequences, masks,)
+    # PlotlyUnmaskLogProbs(unmaskLogProbs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks,)
+    # PlotlyChanges(changes, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Proposed_sequences,)
+    # # PlotlyH(H, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
 
-    plotLogProbs(logprobs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
-    plotMasks(masks, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences)
-    plotChanges(changes, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences)
-    plotUnmaskLogProbs(unmaskLogProbs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
-    plotLevenshtein(levenshtein, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences)
-    plotAttentionMask(attention_masks, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], )
-    
-    PlotlyLogProbs(logprobs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Proposed_sequences, masks, remasks)
-    PlotlyUnmaskLogProbs(unmaskLogProbs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
-    PlotlyChanges(changes, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Proposed_sequences,)
+
+    # outputs, tokenizer = CreateBaseSampleWithHistory(messages, SamplerConfig, ScriptArguments)
+    # logprobs = getLogProbs(outputs)
+    # masks = getEachStepMask(outputs)
+    # remasks = getEachStepMask(outputs, remask=True)
+    # Generated_sequences = getEachStepGeneratedSequence(outputs, tokenizer)
+    # Proposed_sequences = getEachStepProposedSequence(outputs, tokenizer)
+    # changes = getEachStepChange(outputs)
+    # levenshtein = getLevenshtein(Proposed_sequences)
+    # unmaskLogProbs = getUnmaskLogProbs(outputs)
+    # attention_masks = outputs.attention_mask.detach().cpu().numpy()
+    # H = getH(outputs)
+    # num_transferred_tokens = getNumTransferTokens(outputs)
+    # # print(len(num_transferred_tokens), len(num_transferred_tokens[0]), len(num_transferred_tokens[0][0]))
+
+    # getTxt(Proposed_sequences, model_cfg['dir'])
+    # getTxt(Generated_sequences, model_cfg['dir'], proposed_sequence=False)
+
+    # # plotLogProbs(logprobs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
+    # plotMasks(masks, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, remasking=False)
+    # plotMasks(remasks, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, remasking=True)
+    # # plotChanges(changes, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences)
+    # # plotUnmaskLogProbs(unmaskLogProbs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
+    # # plotLevenshtein(levenshtein, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences)
+    # # plotAttentionMask(attention_masks, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], )
+    # # plotH(H, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
+    # plotNumTransferredTokens(num_transferred_tokens, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'])
+
+    # PlotlyLogProbs(logprobs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Proposed_sequences, masks,remasks)
+    # # PlotlyUnmaskLogProbs(unmaskLogProbs, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
+    # # PlotlyChanges(changes, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Proposed_sequences,)
+    # # PlotlyH(H, [f'{model_cfg['name']} - EX1', f'{model_cfg['name']} - EX2', f'{model_cfg['name']} - EX3'], model_cfg['dir'], outputs.block_size, Generated_sequences, masks, remasks)
+
 
 def main():
     for model_cfg in MODELS_TO_TEST:
-        try:
-            run_experiment(model_cfg, messages)
-        except Exception as e:
-            print(f"❌ Error with model {model_cfg['name']}: {e}")
-            continue
+        # try:
+        run_experiment_MDML(model_cfg, messages, SamplerConfig)
+        run_experiment_MDML_remasking(model_cfg, messages, SamplerConfig)
+        # except Exception as e:
+        #     print(f"❌ Error with model {model_cfg['name']}: {e}")
+        #     continue
 
 
 
