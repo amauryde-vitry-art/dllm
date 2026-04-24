@@ -430,8 +430,94 @@ def plotAttentionMask(attention_masks, title_list, save_path):
     plt.grid()    
     plt.savefig(f'StudyAutoRegressionBehavior/{save_path}/attention_masks.png', bbox_inches='tight')
     plt.show()
-    
 
+
+def plotH(Hs, title_list, save_path, blcok_size, sequences, masks, remasking_masks=None):
+    adaptative_masks = getAdaptativeMaskforPlot(masks)
+    for j in range(len(Hs)):
+        token_matrix = _make_visible_tokens(sequences[j])
+        generated_text = token_matrix[-1]
+        data = np.array(Hs[j])
+        n_rows, n_cols = data.shape
+        
+        plt.figure(figsize=(25, 15))
+        ax = plt.gca()
+        ax.set_facecolor((1, 0, 0, 0.3))  
+        ax = sns.heatmap(data, mask=adaptative_masks[j], cmap='viridis', vmin=-1, vmax=1, cbar=True)
+        
+        plt.ylabel('Diffusion iterations')
+        plt.xlabel('tokens index order')
+        plt.title(f'H: Diffusion VS tokens index order ({title_list[j]})')
+        
+        n_blocks = n_cols // blcok_size
+        for i in range(n_blocks + 1):
+            plt.axvline(blcok_size * i, linewidth=4, color='red', linestyle='--', 
+                        label='Block size' if i == 0 else "")
+        
+        if remasking_masks is not None:
+            remasking_array = np.array(remasking_masks)
+            if remasking_array.ndim == 3 and remasking_array.shape[1] == len(Hs):
+                remask_data = remasking_array[:, j, :].astype(bool)
+            else:
+                remask_data = np.array(remasking_masks[j]).astype(bool)
+            remask_overlay = np.zeros((n_rows, n_cols), dtype=float)
+            copy_rows = min(n_rows, remask_data.shape[0])
+            copy_cols = min(n_cols, remask_data.shape[1])
+            remask_overlay[:copy_rows, :copy_cols] = remask_data[:copy_rows, :copy_cols].astype(float)
+            remask_overlay = np.ma.masked_where(remask_overlay == 0, remask_overlay)
+            ax.imshow(
+                remask_overlay,
+                cmap=ListedColormap([(0.0, 0.0, 0.0, 1.0)]),
+                interpolation='none',
+                aspect='auto',
+                origin='upper',
+                extent=(0, n_cols, n_rows, 0),
+                zorder=3,
+            )
+        
+        ax.set_xticks(np.arange(len(generated_text)) + 0.5)
+        ax.set_xticklabels(generated_text, rotation=90, fontsize=8)
+        
+        y_pos = np.arange(n_rows)
+        y_labs = np.arange(1, n_rows + 1)
+        ax.set_yticks(y_pos[::3] + 0.5)
+        ax.set_yticklabels(y_labs[::3])
+        
+        ax.set_xticks(np.arange(len(generated_text) + 1), minor=True)
+        ax.set_yticks(np.arange(n_rows + 1), minor=True)
+        
+        ax.tick_params(which='major', bottom=True, left=True, length=5, color='black')
+        ax.tick_params(which='minor', bottom=False, left=False)
+        
+        ax.grid(which='minor', color='black', linestyle='-', linewidth=0.5, alpha=0.3)
+        ax.grid(which='major', visible=False) 
+        mask_handles = [
+            Patch(facecolor=(1, 0, 0, 0.3), edgecolor='black', label='Beginning of unmasking'),
+            Patch(facecolor=(0.0, 0.0, 0.0, 1.0), edgecolor='black', label='Remasking'),
+            Line2D([0], [0], color='red', linestyle='--', linewidth=4, label='Block size')
+        ] if remasking_masks is not None else [
+            Patch(facecolor=(1, 0, 0, 0.3), edgecolor='black', label='Beginning of unmasking'),
+            Line2D([0], [0], color='red', linestyle='--', linewidth=4, label='Block size')
+        ]
+        plt.xlim(0, n_cols)
+        plt.ylim(n_rows, 0)
+        
+        plt.legend(handles=mask_handles)
+        plt.tight_layout()
+        plt.savefig(f'StudyAutoRegressionBehavior/{save_path}/H_{title_list[j]}.png')
+        plt.show()
+    
+def plotNumTransferredTokens(NumTransferredTokens, title_list, save_path):
+    plt.figure(figsize=(25, 15))
+    for j in range(len(NumTransferredTokens)):
+        sns.heatmap(NumTransferredTokens[j], cmap='viridis', cbar=True, annot=True,)
+        plt.xlabel('Diffusion Iteration')
+        plt.ylabel('Number of Transferred Tokens')
+        plt.title('Number of Transferred Tokens Across Diffusion Iterations')
+        plt.legend()
+        plt.grid()
+        plt.savefig(f'StudyAutoRegressionBehavior/{save_path}/num_transferred_tokens_{title_list[j]}.png')
+        plt.show()
 
 def PlotlyLogProbs(logprobs, title_list, save_path, block_size, sequences, masks, remasking_masks=None):
     masks_adaptative = getAdaptativeMaskforPlot(masks)
@@ -765,5 +851,114 @@ def PlotlyChanges(changesList, title_list, save_path, block_size, sequences, rem
             showlegend=True
         )
         filename = f"StudyAutoRegressionBehavior/{save_path}/Changes_{title_list[j]}.html"
+        fig.write_html(filename)
+
+def PlotlyH(Hs, title_list, save_path, block_size, sequences, masks, remasking_masks=None):
+    adaptative_masks = getAdaptativeMaskforPlot(masks)
+    for j in range(len(Hs)):
+        data = np.array(Hs[j])
+        n_rows, n_cols = data.shape
+        tokens_matrix = _make_visible_tokens(sequences[j])
+        data[adaptative_masks[j] == 1] = np.nan
+        fig = go.Figure(data=go.Heatmap(
+            z=data,
+            x=list(range(n_cols)),
+            y=list(range(1, n_rows + 1)),
+            showscale=True,
+            customdata=tokens_matrix,
+            hovertemplate=(
+                    "<b>Token: %{customdata}</b><br>" +
+                    "Itération: %{y}<br>" +
+                    "Index: %{x}<br>" +
+                    "Valeur: %{z:.4f}" +
+                    "<extra></extra>"
+                        ),
+            colorscale='Viridis',
+            zmin=-1,
+            zmax=1,
+            colorbar=dict(
+            title="H",     
+                ),
+        ))
+
+        if remasking_masks is not None:
+            remask_data = _get_remask_data_for_sample(remasking_masks, j, len(Hs))
+            remask_overlay = np.full((n_rows, n_cols), np.nan)
+            copy_rows = min(n_rows, remask_data.shape[0])
+            copy_cols = min(n_cols, remask_data.shape[1])
+            remask_overlay[:copy_rows, :copy_cols] = remask_data[:copy_rows, :copy_cols].astype(float)
+            fig.add_trace(go.Heatmap(
+                z=remask_overlay,
+                x=list(range(n_cols)),
+                y=list(range(1, n_rows + 1)),
+                showscale=False,
+                hoverinfo='skip',
+                colorscale=[[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,1)']],
+                zmin=0,
+                zmax=1,
+            ))
+
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode='markers',
+            marker=dict(size=12, color='salmon', symbol='square'),
+            name='Beginning of unmasking',
+            showlegend=True
+        ))
+
+        if remasking_masks is not None:
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode='markers',
+                marker=dict(size=12, color='black', symbol='square'),   
+
+                name='Remasking',
+                showlegend=True
+            ))
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode='lines',
+            line=dict(color='red', width=2, dash='dash'),
+            name='Block size'
+        ))
+        for i in range((n_cols // block_size) + 1):
+            fig.add_vline(x=i * block_size - 0.5, line_width=2, line_dash="dash", line_color="red") 
+        fig.update_layout(
+            title=f"H: Diffusion VS tokens index order ({title_list[j]})",
+            template="plotly_white",  
+            plot_bgcolor='salmon',    
+            paper_bgcolor='#F8F9F9',  
+            xaxis=dict(
+                title="tokens index",
+                dtick=1,
+                showticklabels=True,
+                ticks='outside',
+                ticklen=6,
+                tickwidth=1,
+                tickcolor='black',
+                showline=True,
+                linecolor='black',
+                showgrid=False
+            ),
+            yaxis=dict(
+                title="Diffusion iterations",
+                autorange='reversed', 
+                dtick=3,
+                showgrid=False 
+            ),
+            width=1400,
+            height=800,
+            showlegend=True,
+            legend=dict(
+                orientation="h",    
+                yanchor="bottom",
+                y=1.05,               
+                xanchor="right",
+                x=1
+            ),
+            margin=dict(t=150)        
+
+        )
+        filename = f"StudyAutoRegressionBehavior/{save_path}/H_{title_list[j]}.html"
         fig.write_html(filename)
 
