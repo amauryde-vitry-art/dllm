@@ -128,3 +128,9 @@ def getNumTransferTokens(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHis
 
 
 
+def getEntropy(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory):
+    nb_examples = outputs.histories_entropy[0].shape[0]
+    res_entropy =[]
+    for i in range(nb_examples):
+        res_entropy.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_entropy]) 
+    return res_entropy

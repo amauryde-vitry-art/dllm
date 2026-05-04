@@ -7,14 +7,28 @@ from dataclasses import dataclass
 import transformers
 
 import dllm
+import torch
 
 
-
-def CreateBaseSampleWithHistory(sampler_type, messages: list[list[dict[str, str]]], config, Script):
+def CreateBaseSampleWithHistory(
+    sampler_type,
+    messages: list[list[dict[str, str]]],
+    config,
+    Script,
+    seed_override: int | None = None,
+):
     
     parser = transformers.HfArgumentParser((Script, config))
     script_args, sampler_config = parser.parse_args_into_dataclasses()
-    transformers.set_seed(script_args.seed)
+    if seed_override is not None:
+        seed = int(seed_override) & ((1 << 32) - 1)
+        transformers.set_seed(seed)
+    elif script_args.seed is not None:
+        transformers.set_seed(script_args.seed)
+    else:
+        seed = int(torch.seed()) & ((1 << 32) - 1)
+        print('seed', seed)
+        transformers.set_seed(seed)
 
     model = dllm.utils.get_model(model_args=script_args).eval()
     tokenizer = dllm.utils.get_tokenizer(model_args=script_args)
