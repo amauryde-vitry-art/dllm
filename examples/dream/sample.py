@@ -48,8 +48,8 @@ print("TEST: dream.sample()".center(80))
 print("=" * 80)
 
 messages = [
-    [{"role": "user", "content": "Lily runs 12 km/h for 4 hours. How far in 8 hours?"}],
-    [{"role": "user", "content": "Please write an educational python function."}],
+    [{"role": "user", "content": "In humans, the right lung is divided into how many lobes?"}],
+    [{"role": "user", "content": "What is the name of the wizard who runs the Hogwarts School of Witchcraft and Wizardry in the Harry Potter books and films?"}],
 ]
 
 inputs = tokenizer.apply_chat_template(
