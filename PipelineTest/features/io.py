@@ -10,7 +10,7 @@ from GenerateBaseSamplerOutputsAndExtractInfo.GetInfoFromBaseSamplerOutput impor
 import torch 
 from dataclasses import fields
 from dllm.core.samplers.base import BaseSamplerOutputCompleteHistory
-from GenerateBaseSamplerOutputsAndExtractInfo.PlotResults import PlotlyEntropy, PlotlyH, plotH, plotLogProbs, plotMasks, plotChanges, plotLevenshtein, plotAttentionMask, plotNumTransferredTokens, plotUnmaskLogProbs, PlotlyLogProbs, PlotlyUnmaskLogProbs, PlotlyChanges, PlotlySemanticBestLabels, getTxt
+from GenerateBaseSamplerOutputsAndExtractInfo.PlotResults import PlotlyEntropy, PlotlyH, plotH, plotLogProbs, plotMasks, plotChanges, plotLevenshtein, plotAttentionMask, plotNumTransferredTokens, plotUnmaskLogProbs, PlotlyLogProbs, PlotlyUnmaskLogProbs, PlotlyChanges, PlotlySemanticBestLabels, getTxt, plotEntropy
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 from PipelineTest.CreateMetrics import getInterceptCAndTauFromVarMaskedEntropyAcrossTokens
@@ -455,10 +455,11 @@ def GetInfoFromIndex(listIndex, tokenizer, ouputpath='PipelineTest/results/outpu
 
 def PlotInfo(listIndex, tokenizer, title_list, save_path=f"PipelineTest/PlotResults",  ouputpath='PipelineTest/results/outputs.pt'):
     logprobs, masks, remasks, Generated_sequences, Proposed_sequences, changes, levenshtein, unmaskLogProbs, attention_masks, H, block_size, entropies, entropic_costs = GetInfoFromIndex(listIndex, tokenizer, ouputpath)
-    # getTxt(Proposed_sequences, save_path, proposed_sequence=True)
-    # getTxt(Generated_sequences, save_path, proposed_sequence=False)
+    getTxt(Proposed_sequences, save_path, proposed_sequence=True)
+    getTxt(Generated_sequences, save_path, proposed_sequence=False)
 
-    # plotLogProbs(logprobs, title_list, save_path, block_size, Generated_sequences, masks)
+    plotLogProbs(logprobs, title_list, save_path, block_size, Generated_sequences, masks)
+    plotEntropy(entropies, title_list, save_path, block_size, Generated_sequences, masks)
     # plotMasks(masks, title_list, save_path, block_size, Generated_sequences)
     # plotChanges(changes, title_list, save_path, block_size, Generated_sequences)
     # plotUnmaskLogProbs(unmaskLogProbs, title_list, save_path, block_size, Generated_sequences, masks)

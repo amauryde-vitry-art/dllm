@@ -1,39 +1,47 @@
 import sys
 import os
 import time
+import argparse
 
-
+# Add both the sampling dir (for load_data, metric_qwen, AnalyseResults) and project root (for PipelineTest, dllm)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 import torch
 import json
 import transformers
 import torch.distributed as dist
 import dllm
-from dllm.pipelines.dream import DreamSamplerWithCompleteHistory
 from dataclasses import dataclass
-from load_data import load_triviaqa
+from load_data import load_triviaqa, load_naturalquestion, load_hotpotqa
+
+
+DATASET_LOADERS = {
+    "triviaqa": load_triviaqa,
+    "naturalquestion": load_naturalquestion,
+    "hotpotqa": load_hotpotqa,
+}
 
 
 
 @dataclass
 class SamplerConfig(dllm.core.samplers.MDLMSamplerConfig):
-    steps: int = 64
-    max_new_tokens: int = 64
-    block_size: int = 64
+    steps: int = 16
+    max_new_tokens: int = 32
+    block_size: int = 32
     temperature: float = 0.0
-    remasking: str = "entropy"
+    remasking: str = "low_confidence"
 
 @dataclass
 class DreamSamplerConfig(dllm.pipelines.dream.DreamSamplerConfig):
-    steps: int = 64
-    max_new_tokens: int = 64
-    alg: str = "entropy"
+    steps: int = 16
+    max_new_tokens: int = 32
+    alg: str = "maskgit_plus"
     alg_temp: float = 0.0
     top_p: float = 1.0
 
 @dataclass
 class ScriptArguments:
-    model_name_or_path: str = "Dream-org/Dream-v0-Instruct-7B"
+    model_name_or_path: str = "GSAI-ML/LLaDA-8B-Instruct"
     seed: int = 42
     visualize: bool = False
 
@@ -41,6 +49,12 @@ class ScriptArguments:
         self.model_name_or_path = dllm.utils.resolve_with_base_env(
             self.model_name_or_path, "BASE_MODELS_DIR"
         )
+
+
+MODEL_FOR_SAMPLER = {
+    "llada": "GSAI-ML/LLaDA-8B-Instruct",
+    "dream": "Dream-org/Dream-v0-Instruct-7B",
+}
 
 
 def _init_distributed():
@@ -62,23 +76,27 @@ def _cleanup_distributed(world_size: int):
         dist.destroy_process_group()
 
 
-def SampleAnswerTrivaQA(sampler, num_sample, batch_size, suffix, sampler_config_cls=SamplerConfig):
-    rank, world_size, _ = _init_distributed()
+def SampleAnswers(sampler, num_sample, batch_size, suffix, dataset="triviaqa", sampler_config_cls=SamplerConfig, sampler_name="llada"):
+    rank, world_size, local_rank = _init_distributed()
     run_t0 = time.time()
-    print(f"[rank {rank}/{world_size}] Starting run | num_sample={num_sample} | batch_size={batch_size} | suffix={suffix}", flush=True)
+    print(f"[rank {rank}/{world_size}] Starting run | dataset={dataset} | num_sample={num_sample} | batch_size={batch_size} | suffix={suffix}", flush=True)
 
-    script_args = ScriptArguments()
+    script_args = ScriptArguments(model_name_or_path=MODEL_FOR_SAMPLER[sampler_name])
     if script_args.seed is not None:
         transformers.set_seed(script_args.seed + rank)
 
     print(f"[rank {rank}] Loading model/tokenizer: {script_args.model_name_or_path}", flush=True)
-    model = dllm.utils.get_model(model_name_or_path=script_args.model_name_or_path).eval()
+    model = dllm.utils.get_model(
+        model_name_or_path=script_args.model_name_or_path,
+        device_map={"": local_rank} if torch.cuda.is_available() else None,
+    ).eval()
     tokenizer = dllm.utils.get_tokenizer(model_name_or_path=script_args.model_name_or_path)
     sampler_config = sampler_config_cls()
     sampler_obj = sampler(model=model, tokenizer=tokenizer)
     print(f"[rank {rank}] Model/tokenizer ready.", flush=True)
 
-    messages, labels = load_triviaqa(num_samples=num_sample)
+    load_fn = DATASET_LOADERS[dataset]
+    messages, labels = load_fn(num_samples=num_sample)
     print(f"[rank {rank}] Loaded dataset with {len(messages)} samples.", flush=True)
 
     # Shard work across ranks: rank r processes indices r, r+world_size, ...
@@ -194,7 +212,8 @@ def SampleAnswerTrivaQA(sampler, num_sample, batch_size, suffix, sampler_config_
 
     # Rank 0 merges everything into final artifacts
     if rank == 0:
-        from AnalyseResults import mergeOutputsList, _pad_and_cat_tensors
+        from AnalyseResults import mergeOutputsList
+        from PipelineTest.features.io import _pad_and_cat_tensors
         from dllm.core.samplers.base import BaseSamplerOutputCompleteHistory
         from dataclasses import fields as dc_fields
 
@@ -284,22 +303,24 @@ def SampleAnswerTrivaQA(sampler, num_sample, batch_size, suffix, sampler_config_
         torch.save(merged, os.path.join(artifacts_dir, f"outputs_{suffix}.pt"))
         torch.save(tokenizer, os.path.join(artifacts_dir, f"tokenizer_{suffix}.pt"))
 
-        # Save results JSON (without is_hallucination)
-        results_json_path = os.path.join(artifacts_dir, f"results_triviaqa_{suffix}.json")
+        # Save results JSON (without is_hallucination) in PipelineTest/res/
+        res_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "res"))
+        os.makedirs(res_dir, exist_ok=True)
+        results_json_path = os.path.join(res_dir, f"results_{suffix}.json")
         with open(results_json_path, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
 
-        # Save eval JSON (with is_hallucination) in eval/ directory
-        eval_dir = os.path.join(os.path.dirname(__file__), "res", "eval")
+        # Save eval JSON (with is_hallucination) in PipelineTest/res/eval/
+        eval_dir = os.path.join(res_dir, "eval")
         os.makedirs(eval_dir, exist_ok=True)
-        eval_json_path = os.path.join(eval_dir, f"results_triviaqa_{suffix}.json")
+        eval_json_path = os.path.join(eval_dir, f"results_{dataset}_{suffix}.json")
         with open(eval_json_path, "w", encoding="utf-8") as f:
             json.dump(eval_results, f, indent=2, ensure_ascii=False)
 
         accuracy = sum(all_correctness) / len(all_correctness) if all_correctness else 0.0
         print(f"[rank 0] Merged {merged.sequences.shape[0]} samples.", flush=True)
-        print(f"[rank 0] Saved results_triviaqa_{suffix}.json ({len(results)} entries)", flush=True)
-        print(f"[rank 0] Saved eval/results_triviaqa_{suffix}.json ({len(eval_results)} entries)", flush=True)
+        print(f"[rank 0] Saved results_{dataset}_{suffix}.json ({len(results)} entries)", flush=True)
+        print(f"[rank 0] Saved eval/results_{dataset}_{suffix}.json ({len(eval_results)} entries)", flush=True)
         print(f"Accuracy: {accuracy:.2%} ({sum(all_correctness)}/{len(all_correctness)})")
         print(f"[rank 0] All done in {time.time() - run_t0:.1f}s", flush=True)
 
@@ -308,7 +329,44 @@ def SampleAnswerTrivaQA(sampler, num_sample, batch_size, suffix, sampler_config_
     _cleanup_distributed(world_size)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Sample answers from a diffusion LLM")
+    parser.add_argument("--dataset", type=str, choices=["triviaqa", "naturalquestion", "hotpotqa"], default="triviaqa",
+                        help="Dataset to sample from (default: triviaqa)")
+    parser.add_argument("--num_sample", type=int, default=2100, help="Number of samples")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
+    parser.add_argument("--sampler", type=str, choices=["llada", "dream"], default="llada",
+                        help="Sampler to use (default: llada)")
+    parser.add_argument("--steps", type=int, default=16, help="Number of diffusion steps")
+    parser.add_argument("--max_new_tokens", type=int, default=32, help="Max new tokens to generate")
+    return parser.parse_args()
 
-SampleAnswerTrivaQA(dllm.core.samplers.MDLMSamplerWithCompleteHistory, num_sample=2048, batch_size=32, suffix="LLaDa_64steps_64tokens_entropy", sampler_config_cls=SamplerConfig)
 
-# SampleAnswerTrivaQA(DreamSamplerWithCompleteHistory, num_sample=2048, batch_size=32, suffix="DREAM_64steps_64tokens_entropy", sampler_config_cls=DreamSamplerConfig)
+if __name__ == "__main__":
+    args = parse_args()
+
+    if args.sampler == "llada":
+        sampler_cls = dllm.core.samplers.MDLMSamplerWithCompleteHistory
+        config_cls = SamplerConfig
+    else:
+        sampler_cls = dllm.pipelines.dream.sampler.DreamSamplerWithCompleteHistory
+        config_cls = DreamSamplerConfig
+
+    # Override steps/max_new_tokens from CLI
+    config_cls = dataclass(type(f"CLI_{config_cls.__name__}", (config_cls,), {
+        "__annotations__": {"steps": int, "max_new_tokens": int},
+        "steps": args.steps,
+        "max_new_tokens": args.max_new_tokens,
+    }))
+
+    suffix = f"{args.sampler}_{args.steps}steps_{args.max_new_tokens}tokens_{args.dataset}_{args.num_sample}samples"
+
+    SampleAnswers(
+        sampler=sampler_cls,
+        num_sample=args.num_sample,
+        batch_size=args.batch_size,
+        suffix=suffix,
+        dataset=args.dataset,
+        sampler_config_cls=config_cls,
+        sampler_name=args.sampler,
+    )

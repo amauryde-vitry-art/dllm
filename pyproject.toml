@@ -30,6 +30,11 @@ dependencies = [
     "seaborn>=0.13.2",
     "python-levenshtein>=0.27.3",
     "plotly>=6.7.0",
+    "hdbscan>=0.8.42",
+    "umap-learn>=0.5.12",
+    "faiss-cpu>=1.13.2",
+    "lightgbm>=4.6.0",
+    "xgboost>=3.2.0",
 ]
 
 [project.optional-dependencies]

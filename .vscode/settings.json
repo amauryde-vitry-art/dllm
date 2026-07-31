@@ -1,5 +1,6 @@
 {
     "python.analysis.extraPaths": [
         "./dllm"
-    ]
+    ],
+    "liveServer.settings.port": 5501
 }

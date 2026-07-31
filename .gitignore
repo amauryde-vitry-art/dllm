@@ -14,7 +14,9 @@ wheels/
 *.csv
 *.json
 *.png
-*.text
+*.txt
+*.pt
+*.npy
 
 # Study directories
 StudyAutoRegressionBehavior/Dream/
@@ -32,7 +34,6 @@ StudyAutoRegressionBehavior/a2d/
 StudyAutoRegressionBehavior/qwen3MDML/
 StudyAutoRegressionBehavior/qwen_figures_demo/
 StudyAutoRegressionBehavior/qwen_figures_uniforme_remasking_demo/
-dllm/
 
 
 

@@ -93,7 +93,7 @@ def main(config_name="llada", modes=None, n_samples=20, no_padding=True):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analysis and plotting (dispatches to plot modes)")
-    parser.add_argument("--config", type=str, default="llada", choices=["llada", "dream"])
+    parser.add_argument("--config", type=str, default="llada", choices=["llada", "dream", "llada128_400samples", "llada16_32tokens", "dream16", "dream16_32tokens_2100samples_triviaqa_without_collapse", "llada16_32tokens_2100samples_triviaqa_without_collapse"])
     parser.add_argument("--mode", type=str, default="all",
                         help=f"Comma-separated modes or 'all'. Available: {', '.join(MODES)}")
     parser.add_argument("--n-samples", type=int, default=20, help="Number of samples for per-sample modes")

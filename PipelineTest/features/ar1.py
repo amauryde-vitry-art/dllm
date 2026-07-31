@@ -44,6 +44,7 @@ def fit_ar1_model(entropy_tensor):
     for t in range(1, T):
         X_prev = entropy_tensor[:, t-1, :]
         X_curr = entropy_tensor[:, t, :]
+        
         for d in range(D):
             slope, intcpt, _, _, _ = linregress(X_prev[:, d], X_curr[:, d])
             phi[t, d] = slope
@@ -71,9 +72,11 @@ def fit_ar1_model_no_padding(entropy_tensor, padding_2d):
         X_prev = entropy_tensor[:, t-1, :]
         X_curr = entropy_tensor[:, t, :]
         for d in range(D):
+
             valid = ~padding_2d[:, d]
             n_valid = np.sum(valid)
-            if n_valid < 3:
+            print(t, d, n_valid)
+            if n_valid <= 3:
                 continue
             x = X_prev[valid, d]
             y = X_curr[valid, d]
@@ -165,7 +168,6 @@ def fit_ar1_models(outputs, positions, labels, padding_2d=None):
 
     entropy_correct = np.array([entropies[i] for i in correct_pos])
     entropy_halluc = np.array([entropies[i] for i in halluc_pos])
-
     if padding_2d is not None:
         pad_correct = padding_2d[labels == 0]
         pad_halluc = padding_2d[labels == 1]

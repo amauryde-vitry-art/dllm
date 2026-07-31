@@ -56,14 +56,16 @@ def mean_masked_entropy_no_padding(outputs, pad_token_id):
         result.append(float(np.mean(vals)) if vals.size > 0 else 0.0)
     return np.array(result)
 
-
 def mean_entropy_just_unmasked(outputs):
-    """Mean entropy at the step each token is unmasked."""
-    entropies = getEntropyJustUnmasked(outputs)
+    """Mean entropy at the step each token is unmasked (Flat global average)."""
+    entropies = getEntropyJustUnmasked(outputs) # Contient maintenant une liste de tableaux 1D propres
     result = []
     for i in range(len(entropies)):
-        values = np.asarray(entropies[i], dtype=float)[1:]
-        result.append(float(np.mean(values)) if values.size > 0 else 0.0)
+        vals = entropies[i]
+        
+        # Plus besoin de slice [1:] car le tableau ne contient aucun placeholder d'étape vide.
+        # np.mean(vals) fait maintenant la vraie moyenne à plat : Somme(entropies) / 32
+        result.append(float(np.mean(vals)) if vals.size > 0 else 0.0)
     return np.array(result)
 
 

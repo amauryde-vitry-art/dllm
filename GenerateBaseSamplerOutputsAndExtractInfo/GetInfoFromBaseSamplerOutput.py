@@ -182,24 +182,32 @@ def getSemanticBestLogprobsLabel(outputs:dllm.core.samplers.BaseSamplerOutputCom
     return res
 
 
-def getEntropyJustUnmasked(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory):
+def getEntropyJustUnmasked(outputs: dllm.core.samplers.BaseSamplerOutputCompleteHistory):
     nb_examples = outputs.histories_entropy[0].shape[0]
-    res_entropy =[]
+    res_entropy = []
     res_masks = []
     for i in range(nb_examples):
         res_entropy.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_entropy]) 
         res_masks.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_mask])
+        
     entropy_at_unmask_time_list = []
     for i in range(nb_examples):
         masked = np.asarray(res_masks[i], dtype=bool)
         ent = np.asarray(res_entropy[i], dtype=float)
+        
+        # 1. Calcul standard des transitions d'un pas à l'autre
         just_unmasked = np.zeros_like(masked, dtype=bool)
         just_unmasked[1:, :] = masked[:-1, :] & (~masked[1:, :])
 
-        entropy_at_unmask_time = np.full(masked.shape[0], np.nan, dtype=float)
-        for s in range(masked.shape[0]):
-            selected = ent[s, just_unmasked[s]]
-            if selected.size > 0:
-                entropy_at_unmask_time[s] = float(np.mean(selected))
-        entropy_at_unmask_time_list.append(entropy_at_unmask_time)
+        # 2. PRISE EN COMPTE DU DERNIER PAS DE DIFFUSION
+        just_unmasked[-1, :] = just_unmasked[-1, :] | masked[-1, :]
+
+        # =========================================================================
+        # CORRECTION : Extraction à plat de TOUS les tokens validés de la trajectoire
+        # =========================================================================
+        # ent[just_unmasked] renvoie directement un tableau 1D contenant les entropies
+        # de vos 32 tokens, sans distinction d'étape. Les étapes "vides" n'injectent aucun NaN.
+        all_unmasked_tokens = ent[just_unmasked]
+        entropy_at_unmask_time_list.append(all_unmasked_tokens)
+        
     return entropy_at_unmask_time_list

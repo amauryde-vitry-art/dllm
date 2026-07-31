@@ -576,7 +576,7 @@ def plotEntropy(Entropies, title_list, save_path, blcok_size, sequences, masks, 
         plt.figure(figsize=(25, 15))
         ax = plt.gca()
         ax.set_facecolor((1, 0, 0, 0.3))  
-        ax = sns.heatmap(data, mask=adaptative_masks[j], cmap='viridis', vmin=-1, vmax=1, cbar=True)
+        ax = sns.heatmap(data, mask=adaptative_masks[j], cmap='viridis', vmin=0, vmax=np.max(data), cbar=True)
         
         plt.ylabel('Diffusion iterations')
         plt.xlabel('tokens index order')

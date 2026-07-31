@@ -73,12 +73,12 @@ MODELS_TO_TEST = [
         
     # },
 
-    {
-        "name": "Dream",
-        "path": "Dream-org/Dream-v0-Instruct-7B",
-        "dir": "GenerateBaseSamplerOutputsAndExtractInfo/Results/Dream",
-        "type": "dream"
-    },
+    # {
+    #     "name": "Dream",
+    #     "path": "Dream-org/Dream-v0-Instruct-7B",
+    #     "dir": "GenerateBaseSamplerOutputsAndExtractInfo/Results/Dream",
+    #     "type": "dream"
+    # },
 
     # {
     #     "name": "editflow",
@@ -100,12 +100,7 @@ MODELS_TO_TEST = [
         
     # },
 
-    # {
-    #     "name": "LLaDA2",
-    #     "path": " inclusionAI/LLaDA2.0-mini",
-    #     "dir": "LLaDA2"
-        
-    # }
+   
 
 
 ]

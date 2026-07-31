@@ -145,7 +145,7 @@ def parametric_fit_entropy(outputs, k_tokens=20):
 # FINITE-DIFFERENCE RATE OF CHANGE (Tau)
 # =========================================================================
 
-def mean_var_tau_entropy(outputs, window=10):
+def mean_var_tau_entropy(outputs, window=5):
     """Discrete rate of change of step-averaged entropy."""
     entropies = getEntropy(outputs)
     list_mean_tau, list_var_tau = [], []
