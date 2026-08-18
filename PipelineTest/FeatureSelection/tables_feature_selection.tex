@@ -1,0 +1,139 @@
+\documentclass{article}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{geometry}
+\geometry{a4paper, margin=0.8in}
+\begin{document}
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Feature Selection Evaluation for \textbf{16 Steps / 32 Tokens} (LR classifier, AUC-ROC and AUC-PR)}
+\label{tab:fs_16steps_32tokens}
+\begin{tabular}{llcccccc}
+\toprule
+ & & \multicolumn{2}{c}{\textbf{TriviaQA}} & \multicolumn{2}{c}{\textbf{NaturalQuestions}} & \multicolumn{2}{c}{\textbf{HotpotQA}} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8}
+\textbf{Model} & \textbf{Method} & \textbf{ROC} & \textbf{PR} & \textbf{ROC} & \textbf{PR} & \textbf{ROC} & \textbf{PR} \\
+\midrule
+\multirow{6}{*}{\textbf{DREAM}}
+ & Semantic Entropy & 0.742 & 0.722 & 0.691 & 0.746 & 0.690 & 0.767 \\
+ \cmidrule(lr){2-8}
+ & Stability Sel. & 0.836 & 0.835 & 0.769 & 0.842 & 0.816 & 0.889 \\
+ & Top-15 (cross-cfg) & 0.843 & 0.839 & 0.768 & 0.854 & 0.816 & 0.892 \\
+ & Top-25 (cross-cfg) & \textbf{0.850} & \textbf{0.854} & 0.770 & 0.854 & 0.822 & 0.899 \\
+ & Top-31 (cross-cfg) & 0.847 & 0.851 & 0.783 & 0.855 & 0.826 & 0.903 \\
+ & All Features & 0.849 & 0.852 & \textbf{0.796} & \textbf{0.860} & \textbf{0.831} & \textbf{0.906} \\
+\midrule
+\multirow{6}{*}{\textbf{LLaDA}}
+ & Semantic Entropy & 0.796 & 0.813 & 0.788 & 0.842 & 0.730 & 0.770 \\
+ \cmidrule(lr){2-8}
+ & Stability Sel. & 0.840 & 0.876 & 0.771 & 0.862 & 0.786 & 0.858 \\
+ & Top-15 (cross-cfg) & 0.849 & 0.885 & 0.766 & 0.856 & 0.780 & 0.855 \\
+ & Top-25 (cross-cfg) & \textbf{0.861} & \textbf{0.900} & 0.775 & 0.854 & 0.787 & \textbf{0.860} \\
+ & Top-31 (cross-cfg) & 0.859 & 0.899 & \textbf{0.790} & 0.872 & 0.787 & 0.859 \\
+ & All Features & 0.860 & 0.900 & \textbf{0.790} & \textbf{0.875} & \textbf{0.789} & \textbf{0.860} \\
+\bottomrule
+\end{tabular}
+\end{table}
+\newpage
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Feature Selection Evaluation for \textbf{32 Steps / 32 Tokens} (LR classifier, AUC-ROC and AUC-PR)}
+\label{tab:fs_32steps_32tokens}
+\begin{tabular}{llcccccc}
+\toprule
+ & & \multicolumn{2}{c}{\textbf{TriviaQA}} & \multicolumn{2}{c}{\textbf{NaturalQuestions}} & \multicolumn{2}{c}{\textbf{HotpotQA}} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8}
+\textbf{Model} & \textbf{Method} & \textbf{ROC} & \textbf{PR} & \textbf{ROC} & \textbf{PR} & \textbf{ROC} & \textbf{PR} \\
+\midrule
+\multirow{6}{*}{\textbf{DREAM}}
+ & Semantic Entropy & 0.718 & 0.672 & 0.662 & 0.740 & 0.700 & 0.776 \\
+ \cmidrule(lr){2-8}
+ & Stability Sel. & 0.829 & \textbf{0.808} & 0.765 & 0.833 & 0.796 & 0.855 \\
+ & Top-15 (cross-cfg) & 0.827 & 0.801 & 0.765 & \textbf{0.841} & 0.800 & 0.865 \\
+ & Top-25 (cross-cfg) & 0.832 & 0.802 & 0.762 & 0.836 & 0.803 & 0.870 \\
+ & Top-31 (cross-cfg) & 0.833 & 0.800 & 0.758 & 0.829 & \textbf{0.813} & \textbf{0.879} \\
+ & All Features & \textbf{0.836} & 0.803 & \textbf{0.767} & 0.834 & \textbf{0.813} & 0.874 \\
+\midrule
+\multirow{6}{*}{\textbf{LLaDA}}
+ & Semantic Entropy & 0.758 & 0.742 & 0.771 & 0.825 & 0.684 & 0.699 \\
+ \cmidrule(lr){2-8}
+ & Stability Sel. & 0.832 & 0.841 & 0.775 & 0.862 & 0.761 & 0.802 \\
+ & Top-15 (cross-cfg) & 0.833 & 0.844 & 0.774 & 0.859 & 0.753 & 0.794 \\
+ & Top-25 (cross-cfg) & 0.833 & 0.844 & 0.789 & 0.873 & \textbf{0.765} & \textbf{0.807} \\
+ & Top-31 (cross-cfg) & \textbf{0.840} & \textbf{0.847} & \textbf{0.835} & \textbf{0.902} & \textbf{0.765} & \textbf{0.807} \\
+ & All Features & 0.835 & 0.841 & 0.828 & 0.894 & \textbf{0.765} & 0.805 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\newpage
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Feature Selection Evaluation for \textbf{32 Steps / 64 Tokens} (LR classifier, AUC-ROC and AUC-PR)}
+\label{tab:fs_32steps_64tokens}
+\begin{tabular}{llcccccc}
+\toprule
+ & & \multicolumn{2}{c}{\textbf{TriviaQA}} & \multicolumn{2}{c}{\textbf{NaturalQuestions}} & \multicolumn{2}{c}{\textbf{HotpotQA}} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8}
+\textbf{Model} & \textbf{Method} & \textbf{ROC} & \textbf{PR} & \textbf{ROC} & \textbf{PR} & \textbf{ROC} & \textbf{PR} \\
+\midrule
+\multirow{6}{*}{\textbf{DREAM}}
+ & Semantic Entropy & 0.726 & 0.697 & 0.644 & 0.664 & 0.707 & 0.779 \\
+ \cmidrule(lr){2-8}
+ & Stability Sel. & 0.855 & 0.853 & 0.731 & 0.789 & 0.794 & 0.851 \\
+ & Top-15 (cross-cfg) & 0.860 & 0.856 & \textbf{0.770} & \textbf{0.814} & 0.788 & 0.847 \\
+ & Top-25 (cross-cfg) & \textbf{0.870} & \textbf{0.863} & 0.764 & 0.806 & 0.790 & 0.845 \\
+ & Top-31 (cross-cfg) & 0.860 & 0.857 & 0.764 & 0.801 & 0.789 & \textbf{0.856} \\
+ & All Features & 0.860 & 0.857 & 0.765 & 0.803 & \textbf{0.796} & 0.852 \\
+\midrule
+\multirow{6}{*}{\textbf{LLaDA}}
+ & Semantic Entropy & 0.773 & 0.841 & 0.761 & 0.876 & 0.663 & 0.764 \\
+ \cmidrule(lr){2-8}
+ & Stability Sel. & 0.750 & 0.874 & 0.731 & 0.889 & 0.685 & 0.806 \\
+ & Top-15 (cross-cfg) & 0.772 & 0.888 & 0.743 & 0.889 & 0.677 & 0.788 \\
+ & Top-25 (cross-cfg) & 0.774 & 0.886 & 0.771 & 0.902 & 0.707 & 0.823 \\
+ & Top-31 (cross-cfg) & 0.778 & 0.889 & 0.778 & 0.907 & \textbf{0.717} & \textbf{0.829} \\
+ & All Features & \textbf{0.784} & \textbf{0.892} & \textbf{0.781} & \textbf{0.908} & 0.714 & 0.825 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\newpage
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Feature Selection Evaluation for \textbf{64 Steps / 64 Tokens} (LR classifier, AUC-ROC and AUC-PR)}
+\label{tab:fs_64steps_64tokens}
+\begin{tabular}{llcccccc}
+\toprule
+ & & \multicolumn{2}{c}{\textbf{TriviaQA}} & \multicolumn{2}{c}{\textbf{NaturalQuestions}} & \multicolumn{2}{c}{\textbf{HotpotQA}} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8}
+\textbf{Model} & \textbf{Method} & \textbf{ROC} & \textbf{PR} & \textbf{ROC} & \textbf{PR} & \textbf{ROC} & \textbf{PR} \\
+\midrule
+\multirow{6}{*}{\textbf{DREAM}}
+ & Semantic Entropy & 0.727 & 0.678 & 0.659 & 0.724 & 0.729 & 0.824 \\
+ \cmidrule(lr){2-8}
+ & Stability Sel. & 0.826 & 0.773 & \textbf{0.796} & \textbf{0.847} & 0.814 & 0.891 \\
+ & Top-15 (cross-cfg) & 0.824 & 0.770 & 0.787 & 0.833 & 0.812 & \textbf{0.898} \\
+ & Top-25 (cross-cfg) & 0.838 & 0.802 & 0.793 & 0.838 & 0.813 & 0.886 \\
+ & Top-31 (cross-cfg) & \textbf{0.842} & \textbf{0.806} & 0.793 & 0.836 & 0.819 & 0.891 \\
+ & All Features & 0.839 & 0.802 & 0.786 & 0.830 & \textbf{0.822} & 0.895 \\
+\midrule
+\multirow{6}{*}{\textbf{LLaDA}}
+ & Semantic Entropy & 0.797 & 0.788 & 0.762 & 0.817 & 0.649 & 0.643 \\
+ \cmidrule(lr){2-8}
+ & Stability Sel. & 0.755 & 0.791 & 0.723 & 0.847 & 0.740 & 0.772 \\
+ & Top-15 (cross-cfg) & 0.727 & 0.777 & 0.736 & 0.852 & 0.725 & 0.754 \\
+ & Top-25 (cross-cfg) & 0.766 & 0.801 & 0.761 & \textbf{0.868} & 0.738 & 0.772 \\
+ & Top-31 (cross-cfg) & 0.775 & 0.805 & 0.765 & \textbf{0.868} & \textbf{0.743} & \textbf{0.774} \\
+ & All Features & \textbf{0.782} & \textbf{0.812} & \textbf{0.766} & 0.867 & \textbf{0.743} & \textbf{0.774} \\
+\bottomrule
+\end{tabular}
+\end{table}
+\newpage
+\end{document}@
