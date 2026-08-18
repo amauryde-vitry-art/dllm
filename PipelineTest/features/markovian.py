@@ -141,95 +141,13 @@ def parametric_fit_entropy(outputs, k_tokens=20):
     return np.array(list_c), np.array(list_tau), np.array(list_m)
 
 
-# =========================================================================
-# FINITE-DIFFERENCE RATE OF CHANGE (Tau)
-# =========================================================================
-
-def mean_var_tau_entropy(outputs, window=5):
-    """Discrete rate of change of step-averaged entropy."""
-    entropies = getEntropy(outputs)
-    list_mean_tau, list_var_tau = [], []
-    for i in range(len(entropies)):
-        ent = np.asarray(entropies[i], dtype=float)
-        ent_avg = np.mean(ent, axis=1)
-        n_steps = len(ent_avg)
-        t_indices = np.arange(0, n_steps - window, window)
-        tau = (ent_avg[t_indices + window] - ent_avg[t_indices]) / window
-        list_mean_tau.append(np.mean(tau))
-        list_var_tau.append(np.var(tau))
-    return np.array(list_mean_tau), np.array(list_var_tau)
-
-
-# =========================================================================
-# SHAPE FEATURES ON MASKED VARIANCE CURVE V(t)
-# =========================================================================
-
-def _masked_entropy_across_tokens_curve(outputs):
-    """Compute V(t) = Var_d(H(t,d) | masked) for each sample."""
-    entropies = getEntropy(outputs)
-    masks = getEachStepMask(outputs)
-    all_curves = []
-    for i in range(len(entropies)):
-        ent = np.asarray(entropies[i], dtype=float)
-        mask = np.asarray(masks[i], dtype=bool)
-        step_vars = []
-        for s in range(ent.shape[0]):
-            masked_vals = ent[s, mask[s]]
-            if len(masked_vals) > 1:
-                step_vars.append(np.var(masked_vals))
-        all_curves.append(step_vars)
-    return all_curves
-
-
-def auc_masked_entropy_curve(outputs):
-    """AUC (integral) of the V(t) curve."""
-    curves = _masked_entropy_across_tokens_curve(outputs)
-    return np.array([integrate.trapezoid(c) for c in curves])
-
-
-def max_masked_entropy_curve(outputs):
-    """Maximum of V(t) curve."""
-    curves = _masked_entropy_across_tokens_curve(outputs)
-    return np.array([np.max(c) for c in curves])
-
-
-def argmax_masked_entropy_curve(outputs):
-    """Step of maximum V(t)."""
-    curves = _masked_entropy_across_tokens_curve(outputs)
-    return np.array([np.argmax(c) for c in curves])
-
-
-def skewness_masked_entropy_curve(outputs):
-    """Skewness of V(t) distribution."""
-    curves = _masked_entropy_across_tokens_curve(outputs)
-    return np.array([skew(c) for c in curves])
-
-
-def kurtosis_masked_entropy_curve(outputs):
-    """Kurtosis of V(t) distribution."""
-    curves = _masked_entropy_across_tokens_curve(outputs)
-    return np.array([kurtosis(c) for c in curves])
-
-
-def mean_curvature_masked_entropy_curve(outputs):
-    """Mean curvature of V(t) curve."""
-    curves = _masked_entropy_across_tokens_curve(outputs)
-    result = []
-    for c in curves:
-        y = np.asarray(c)
-        x = np.arange(len(y))
-        dy = np.gradient(y, x)
-        d2y = np.gradient(dy, x)
-        curvature = np.abs(d2y) / (1 + dy**2)**(3/2)
-        result.append(np.mean(curvature))
-    return np.array(result)
 
 
 # =========================================================================
 # COMBINED EXTRACTION
 # =========================================================================
 
-def get_markovian_features(outputs, k_tokens=20):
+def get_markovian_features(outputs, k_tokens=None):
     """Extract all Markovian dynamic features.
     
     Returns:
@@ -240,13 +158,7 @@ def get_markovian_features(outputs, k_tokens=20):
     alpha_ent_avg, beta_ent_avg = alpha_beta_entropy_avg(outputs, k_tokens=k_tokens)
     alpha_lp, beta_lp = alpha_beta_logprob(outputs)
     C, tau, m = parametric_fit_entropy(outputs, k_tokens=k_tokens)
-    mean_tau, var_tau = mean_var_tau_entropy(outputs)
-    auc = auc_masked_entropy_curve(outputs)
-    max_v = max_masked_entropy_curve(outputs)
-    argmax_v = argmax_masked_entropy_curve(outputs)
-    skew_v = skewness_masked_entropy_curve(outputs)
-    kurt_v = kurtosis_masked_entropy_curve(outputs)
-    curv_v = mean_curvature_masked_entropy_curve(outputs)
+    
 
     feats = {
         "AlphaEntropy": alpha_ent,
@@ -258,14 +170,7 @@ def get_markovian_features(outputs, k_tokens=20):
         "C_fit": C,
         "Tau_fit": tau,
         "M_fit": m,
-        "MeanTau": mean_tau,
-        "VarTau": var_tau,
-        "AUC_V": auc,
-        "Max_V": max_v,
-        "Argmax_V": argmax_v,
-        "Skewness_V": skew_v,
-        "Kurtosis_V": kurt_v,
-        "MeanCurvature_V": curv_v,
+       
     }
 
     feature_names = list(feats.keys())

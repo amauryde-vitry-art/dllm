@@ -78,6 +78,65 @@ def plot_mean_var_trajectories(ctx: PlotContext):
     print(f"    Saved: {path}")
 
 
+def plot_mean_var_logprob_trajectories(ctx: PlotContext):
+    """Population-level mean and variance of masked log-probabilities per step."""
+    save_dir = ctx.get_save_dir("benchmark_global")
+
+    correct_pos = ctx.positions[ctx.labels == 0]
+    halluc_pos = ctx.positions[ctx.labels == 1]
+
+    def per_step_stats(pos_arr):
+        lp_arr = np.array([ctx.logprobs[i] for i in pos_arr])
+        mask_arr = np.array([ctx.masks[i] for i in pos_arr], dtype=float)
+        N, T, D = lp_arr.shape
+        mean_per_step = np.zeros(T)
+        var_per_step = np.zeros(T)
+        for t in range(T):
+            step_means = []
+            step_vars = []
+            for n in range(N):
+                m = mask_arr[n, t, :] > 0
+                if np.sum(m) > 0:
+                    vals = lp_arr[n, t, m]
+                    step_means.append(np.mean(vals))
+                    if np.sum(m) > 1:
+                        step_vars.append(np.var(vals))
+            mean_per_step[t] = np.mean(step_means) if step_means else 0
+            var_per_step[t] = np.mean(step_vars) if step_vars else 0
+        return mean_per_step, var_per_step
+
+    mean_c, var_c = per_step_stats(correct_pos)
+    mean_h, var_h = per_step_stats(halluc_pos)
+    T = len(mean_c)
+    steps = np.arange(T)
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10))
+
+    ax = axes[0]
+    ax.plot(steps, mean_c, "o-", color="green", markersize=3, label="Correct")
+    ax.plot(steps, mean_h, "s-", color="red", markersize=3, label="Hallucination")
+    ax.set_title("Mean Masked Log-Probability (averaged over samples)", fontweight="bold")
+    ax.set_xlabel("Diffusion Step")
+    ax.set_ylabel("Mean Masked LogProb")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    ax = axes[1]
+    ax.plot(steps, var_c, "o-", color="green", markersize=3, label="Correct")
+    ax.plot(steps, var_h, "s-", color="red", markersize=3, label="Hallucination")
+    ax.set_title("Variance of Masked Log-Probability Across Tokens (averaged over samples)", fontweight="bold")
+    ax.set_xlabel("Diffusion Step")
+    ax.set_ylabel("Variance")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    path = os.path.join(save_dir, "trajectories_mean_var_logprob.png")
+    plt.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"    Saved: {path}")
+
+
 def plot_scatter_features(ctx: PlotContext):
     """Scatter plot: MeanMaskedEntropy vs VarMaskedEntropyAcrossTokens."""
     save_dir = ctx.get_save_dir("benchmark_global")
@@ -171,8 +230,11 @@ def plot(config_name="llada"):
     print("\n[benchmark_global] Loading data...")
     ctx = PlotContext(config_name, use_padding=True)
 
-    print("[benchmark_global] Mean/Var trajectories...")
+    print("[benchmark_global] Mean/Var entropy trajectories...")
     plot_mean_var_trajectories(ctx)
+
+    print("[benchmark_global] Mean/Var logprob trajectories...")
+    plot_mean_var_logprob_trajectories(ctx)
 
     print("[benchmark_global] Scatter (mean vs var)...")
     plot_scatter_features(ctx)

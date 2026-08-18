@@ -71,6 +71,7 @@ def var_semantic_entropy_masked_across_tokens(outputs):
 def var_semantic_dispersion(outputs):
     """Variance of semantic dispersion across steps (per token), averaged."""
     disp = getSemanticDispersion(outputs)
+    print('disp', disp)
     return np.array([
         float(np.mean(np.var(np.asarray(disp[i], dtype=float), axis=0)))
         for i in range(len(disp))
@@ -98,10 +99,10 @@ def get_semantic_features(outputs):
         feature_names: list of str
     """
     feats = {
-        "VarSemanticEntropy": var_semantic_entropy(outputs),
-        "VarSemanticEntropyAcrossTokens": var_semantic_entropy_across_tokens(outputs),
-        "VarSemanticEntropyMasked": var_semantic_entropy_masked(outputs),
-        "VarSemanticEntropyMaskedAcrossTokens": var_semantic_entropy_masked_across_tokens(outputs),
+        # "VarSemanticEntropy": var_semantic_entropy(outputs),
+        # "VarSemanticEntropyAcrossTokens": var_semantic_entropy_across_tokens(outputs),
+        # "VarSemanticEntropyMasked": var_semantic_entropy_masked(outputs),
+        # "VarSemanticEntropyMaskedAcrossTokens": var_semantic_entropy_masked_across_tokens(outputs),
         "VarSemanticDispersion": var_semantic_dispersion(outputs),
         "VarSemanticDispersionAcrossTokens": var_semantic_dispersion_across_tokens(outputs),
     }

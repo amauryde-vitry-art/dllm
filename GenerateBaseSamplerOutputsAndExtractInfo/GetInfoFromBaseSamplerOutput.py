@@ -211,3 +211,35 @@ def getEntropyJustUnmasked(outputs: dllm.core.samplers.BaseSamplerOutputComplete
         entropy_at_unmask_time_list.append(all_unmasked_tokens)
         
     return entropy_at_unmask_time_list
+
+
+
+def getLogProbsJustUnmasked(outputs):
+    nb_examples = outputs.histories_logprobs[0].shape[0]
+    res_logprobs = []
+    res_masks = []
+    for i in range(nb_examples):
+        res_logprobs.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_logprobs]) 
+        res_masks.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_mask])
+        
+    logprobs_at_unmask_time_list = []
+    for i in range(nb_examples):
+        masked = np.asarray(res_masks[i], dtype=bool)
+        logp = np.asarray(res_logprobs[i], dtype=float)
+        
+        # 1. Calcul standard des transitions d'un pas à l'autre
+        just_unmasked = np.zeros_like(masked, dtype=bool)
+        just_unmasked[1:, :] = masked[:-1, :] & (~masked[1:, :])
+
+        # 2. PRISE EN COMPTE DU DERNIER PAS DE DIFFUSION
+        just_unmasked[-1, :] = just_unmasked[-1, :] | masked[-1, :]
+
+        # =========================================================================
+        # CORRECTION : Extraction à plat de TOUS les tokens validés de la trajectoire
+        # =========================================================================
+        # logp[just_unmasked] renvoie directement un tableau 1D contenant les log-probabilités
+        # de vos 32 tokens, sans distinction d'étape. Les étapes "vides" n'injectent aucun NaN.
+        all_unmasked_tokens = logp[just_unmasked]
+        logprobs_at_unmask_time_list.append(all_unmasked_tokens)
+        
+    return logprobs_at_unmask_time_list
