@@ -17,6 +17,7 @@ import torch.distributed as dist
 import dllm
 from dataclasses import dataclass
 from load_data import load_triviaqa, load_naturalquestion, load_hotpotqa
+from dllm.pipelines.diffusiongemma.sampler import DiffusionGemmaSamplerWithCompleteHistory, DiffusionGemmaSamplerConfig
 
 
 DATASET_LOADERS = {
@@ -45,6 +46,16 @@ class DreamSamplerConfig(dllm.pipelines.dream.DreamSamplerConfig):
     temperature: float = 0.0
 
 @dataclass
+class GemmaSamplerConfig(DiffusionGemmaSamplerConfig):
+    max_new_tokens: int = 64
+    steps: int = 64
+    max_temperature: float = None
+    min_temperature: float = None
+    return_dict: bool = True
+    canvas_length: int = 64
+
+
+@dataclass
 class ScriptArguments:
     model_name_or_path: str = "GSAI-ML/LLaDA-8B-Instruct"
     seed: int = 42
@@ -59,6 +70,7 @@ class ScriptArguments:
 MODEL_FOR_SAMPLER = {
     "llada": "GSAI-ML/LLaDA-8B-Instruct",
     "dream": "Dream-org/Dream-v0-Instruct-7B",
+    "diffgemma": "google/diffusiongemma-26B-A4B-it",
 }
 
 
@@ -113,6 +125,7 @@ def _run_batches_for_group(
     rank,
     temp_label,
     group_name,
+    processor=None,
 ):
     """
     Runs sampling over a subset of the (already-sharded) dataset using a
@@ -151,11 +164,32 @@ def _run_batches_for_group(
             flush=True,
         )
 
-        inputs = tokenizer.apply_chat_template(
-            batch_messages,
-            add_generation_prompt=True,
-            tokenize=True,
-        )
+        # Encodage propre séquence par séquence puis conversion en liste de tenseurs 1D PyTorch
+        if processor is not None:
+          # Pour DiffGemma
+          formatted_prompts = [
+              processor.apply_chat_template(
+                  msg, add_generation_prompt=True, tokenize=False, 
+              )
+              for msg in batch_messages
+          ]
+          inputs = [
+              tokenizer.encode(p, return_tensors="pt").squeeze(0)
+              for p in formatted_prompts
+          ]
+        else:
+          # Pour LLaDA / Dream / Samplers standards
+          formatted_prompts = [
+              tokenizer.apply_chat_template(
+                  msg, add_generation_prompt=True, tokenize=False
+              )
+              for msg in batch_messages
+          ]
+          inputs = [
+              tokenizer.encode(p, return_tensors="pt").squeeze(0)
+              for p in formatted_prompts
+          ]
+
 
         outputs = sampler_obj.sample(inputs, sampler_config, return_dict=True)
         # sample_indices are set by the caller once shard-local -> global
@@ -217,12 +251,45 @@ def SampleAnswers(
         transformers.set_seed(script_args.seed + rank)
 
     print(f"[rank {rank}] Loading model/tokenizer: {script_args.model_name_or_path}", flush=True)
-    model = dllm.utils.get_model(
-        model_name_or_path=script_args.model_name_or_path,
-        device_map={"": local_rank} if torch.cuda.is_available() else None,
-    ).eval()
-    tokenizer = dllm.utils.get_tokenizer(model_name_or_path=script_args.model_name_or_path)
-    sampler_obj = sampler(model=model, tokenizer=tokenizer)
+
+    if sampler_name == "diffgemma":
+        from transformers import AutoProcessor, DiffusionGemmaForBlockDiffusion
+        model_path = MODEL_FOR_SAMPLER["diffgemma"]
+        processor = AutoProcessor.from_pretrained(model_path)
+        device_map = {
+            "model.encoder.language_model.embed_tokens": 0,
+            "model.decoder.embed_tokens": 0,
+            "model.encoder.vision_tower": 0,
+            "model.encoder.embed_vision": 0,
+            "model.decoder.self_conditioning": 0,
+            "lm_head": 0,
+            "model.encoder.language_model.norm": 1,
+            "model.decoder.norm": 1,
+        }
+        for i in range(30):
+            gpu = 0 if i < 15 else 1
+            device_map[f"model.encoder.language_model.layers.{i}"] = gpu
+            device_map[f"model.decoder.layers.{i}"] = gpu
+        model = DiffusionGemmaForBlockDiffusion.from_pretrained(
+            model_path, torch_dtype=torch.bfloat16, device_map=device_map,
+        ).eval()
+        tokenizer = processor.tokenizer
+        sampler_obj = sampler(model=model, tokenizer=tokenizer)
+    else:
+        processor = None
+        model = dllm.utils.get_model(
+            model_name_or_path=script_args.model_name_or_path,
+            device_map={"": local_rank} if torch.cuda.is_available() else None,
+        ).eval()
+        
+        # --- PATCH POUR LLADA / DREAM : Ajouter use_cache s'il manque ---
+        if not hasattr(model.config, "use_cache"):
+            model.config.use_cache = False
+
+        tokenizer = dllm.utils.get_tokenizer(
+            model_name_or_path=script_args.model_name_or_path
+        )
+        sampler_obj = sampler(model=model, tokenizer=tokenizer)
 
     # Build two configs sharing all fields except temperature.
     config_low = sampler_config_cls()
@@ -290,6 +357,7 @@ def SampleAnswers(
         rank=rank,
         temp_label=temp_low,
         group_name="LOW-TEMP",
+        processor=processor,
     )
 
     # --- Run high-temperature batches (hallucination-leaning samples) ---
@@ -304,6 +372,7 @@ def SampleAnswers(
         rank=rank,
         temp_label=temp_high,
         group_name="HIGH-TEMP",
+        processor=processor,
     )
 
     # Remap shard-local indices -> global dataset indices for both results
@@ -347,8 +416,10 @@ def SampleAnswers(
     # Both modes load Qwen for collapse detection; only "qwen" mode uses it for factuality too
     from metric_qwen_without_collapse import load_qwen, compute_correctness_truthfulqa, compute_correctness_exact_match
 
-    print(f"[rank {rank}] Loading Qwen evaluator on cuda:{rank}...", flush=True)
-    tokenizer_qwen, model_qwen = load_qwen(device=rank)
+    # Dans sample_answers_without_collapse.py autour de la ligne 390 :
+    eval_device = rank if world_size > 1 else (1 if torch.cuda.device_count() > 1 else 0)
+    print(f"[rank {rank}] Loading Qwen evaluator on cuda:{eval_device}...", flush=True)
+    tokenizer_qwen, model_qwen = load_qwen(device=eval_device)
 
     if eval_mode == "qwen":
         print(f"[rank {rank}] Running Qwen eval (collapse + factuality) on {len(local_results)} samples...", flush=True)
@@ -384,8 +455,19 @@ def SampleAnswers(
     os.remove(local_results_path)
 
     # Barrier so rank 0 waits for all shards to be written
+    # Synchronisation via le disque dur (évite d'appeler NCCL après déchargement VRAM)
     if world_size > 1:
-        dist.barrier()
+      if rank != 0:
+        flag_file = os.path.join(artifacts_dir, f"_done_rank{rank}.flag")
+        with open(flag_file, "w") as f:
+          f.write("done")
+      else:
+        for r in range(1, world_size):
+          flag_file = os.path.join(artifacts_dir, f"_done_rank{r}.flag")
+          while not os.path.exists(flag_file):
+            time.sleep(0.5)
+          if os.path.exists(flag_file):
+            os.remove(flag_file)
 
     # Rank 0 merges everything into final artifacts
     if rank == 0:
@@ -522,11 +604,11 @@ def parse_args():
                         help="Dataset to sample from (default: triviaqa)")
     parser.add_argument("--num_sample", type=int, default=2100, help="Number of samples")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
-    parser.add_argument("--sampler", type=str, choices=["llada", "dream"], default="llada",
+    parser.add_argument("--sampler", type=str, choices=["llada", "dream", "diffgemma"], default="llada",
                         help="Sampler to use (default: llada)")
     parser.add_argument("--steps", type=int, default=16, help="Number of diffusion steps")
     parser.add_argument("--max_new_tokens", type=int, default=32, help="Max new tokens to generate")
-    parser.add_argument("--low_temp_frac", type=float, default=0.4,
+    parser.add_argument("--low_temp_frac", type=float, default=1,
                         help="Fraction of the dataset sampled at temp_low (default: 0.4 -> 40%%)")
     parser.add_argument("--temp_low", type=float, default=0.0,
                         help="Low temperature value, used to harvest factual-leaning samples (default: 0.0)")
@@ -548,16 +630,26 @@ if __name__ == "__main__":
     if args.sampler == "llada":
         sampler_cls = dllm.core.samplers.MDLMSamplerWithCompleteHistory
         config_cls = SamplerConfig
+    elif args.sampler == "diffgemma":
+        sampler_cls = DiffusionGemmaSamplerWithCompleteHistory
+        config_cls = GemmaSamplerConfig
     else:
         sampler_cls = dllm.pipelines.dream.sampler.DreamSamplerWithCompleteHistory
         config_cls = DreamSamplerConfig
 
     # Override steps/max_new_tokens from CLI
-    config_cls = dataclass(type(f"CLI_{config_cls.__name__}", (config_cls,), {
+    overrides = {
         "__annotations__": {"steps": int, "max_new_tokens": int},
         "steps": args.steps,
         "max_new_tokens": args.max_new_tokens,
-    }))
+    }
+    if args.sampler == "diffgemma":
+        overrides["__annotations__"]["canvas_length"] = int
+        overrides["canvas_length"] = args.max_new_tokens
+    elif args.sampler == "llada":
+        overrides["__annotations__"]["block_size"] = int
+        overrides["block_size"] = args.max_new_tokens
+    config_cls = dataclass(type(f"CLI_{config_cls.__name__}", (config_cls,), overrides))
 
     suffix = (
         f"{args.sampler}_{args.steps}steps_{args.max_new_tokens}tokens_{args.dataset}_"

@@ -208,7 +208,7 @@ def detect_mode_collapse(
 # =========================================================================
 
 def load_qwen(device=None):
-    tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen3-8B', trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen3.5-9B', trust_remote_code=True)
     
     tokenizer.padding_side = "left" 
     
@@ -221,50 +221,117 @@ def load_qwen(device=None):
         device_map = {"": device}
         
     model = AutoModelForCausalLM.from_pretrained(
-        'Qwen/Qwen3-8B',
+        'Qwen/Qwen3.5-9B',
         device_map=device_map,
         dtype=torch.float16,
         trust_remote_code=True,
     ).eval()
     return tokenizer, model
 
+from jinja2 import Template
+
+
 def get_prompt(sample):
-    messages = [
-        {'role': 'system', 'content': 'You are a helpful assistant.'},
-        {'role': 'user', 'content': ''}
+  # 1. Extraction et nettoyage des données de sample
+  query = sample.get("question", "").strip()
+  generated_answer = sample.get("answer", "").strip()
+
+  # Sépare le premier label (expected_answer) et les suivants (answer_aliases)
+  labels = sample.get("label", [])
+  flat_labels = []
+
+  if isinstance(labels, str):
+    flat_labels = [labels.strip()]
+  elif isinstance(labels, list):
+    for entry in labels:
+      if isinstance(entry, str):
+        flat_labels.append(entry.strip())
+      elif isinstance(entry, list) and len(entry) > 0:
+        flat_labels.append(str(entry[0]).strip())
+
+  expected_answer = flat_labels[0] if flat_labels else ""
+  answer_aliases = flat_labels[1:] if len(flat_labels) > 1 else []
+
+  # 2. Votre template TRUE_FALSE_PROMPT exact (syntaxe Jinja2)
+  TRUE_FALSE_PROMPT = """
+You are an expert evaluator tasked with determining if two answers convey compatible information. Your task is to make a binary True/False judgment on whether the answers are SEMANTICALLY COMPATIBLE.
+
+Query:
+{{ query }}
+
+Expected Answer:
+{{ expected_answer }}
+{% if answer_aliases %}
+Answer Aliases (Additional Correct Answers):
+{% for alias in answer_aliases %}
+- {{ alias }}
+{% endfor %}
+{% endif %}
+
+Generated Answer:
+{{ generated_answer }}
+
+CRITICAL INSTRUCTIONS:
+1. FIRST, perform a simple VERBATIM TEXT COMPARISON:
+   - If the generated answer is IDENTICAL (exact same text) to EITHER the expected answer OR ANY of the answer aliases, your judgment MUST be TRUE
+   - If not identical to any of them, proceed to semantic comparison
+
+2. For SEMANTIC COMPARISON, use these MANDATORY RULES:
+   - Judge "True" if the generated answer matches the SEMANTIC MEANING of EITHER the expected answer OR ANY of the answer aliases
+   - Judge "True" WHENEVER the general meaning or core concept is the same as either the expected answer or any alias
+   - Judge "True" if one answer is GENERAL and one is SPECIFIC about the same thing
+   - Judge "True" if one answer names a CATEGORY (e.g., "missionaries") and the other provides SPECIFIC INSTANCES of that category (e.g., "Augustine was sent by Pope Gregory")
+   - Judge "True" if one answer gives a BRIEF fact and the other ELABORATES with more details
+   - Judge "True" if one answer is more detailed but does NOT contradict the other
+   - Judge "False" ONLY if the answers directly CONTRADICT all of the expected answer and all aliases, or discuss ENTIRELY different topics
+
+3. EXTREMELY IMPORTANT RULES ABOUT SPECIFICITY:
+   - When one answer is general and one is specific → TRUE
+   - When one uses a category term and one gives examples → TRUE
+   - When one gives "who/what" and the other adds "when/where/how/why" → TRUE
+   - When one gives a person's role and the other gives their name → TRUE
+   - When one refers to a group and the other names individuals → TRUE
+
+4. Always check if the specific answer is an INSTANCE or EXAMPLE of the general answer
+   - If it is, the judgment MUST be TRUE regardless of how detailed the specific answer is
+
+5. The query is provided ONLY for context - do NOT use it in your judgment
+
+6. IMPORTANT: The generated answer should be considered TRUE if it matches EITHER the expected answer OR ANY of the answer aliases in meaning
+
+FINAL CHECK BEFORE SUBMITTING:
+- If the generated answer could reasonably be considered matching ANY of the expected answer or aliases → TRUE
+- If after reading all answers, they feel like they're talking about the same basic concept → TRUE
+- If you think "the generated answer is not contradicting the expected answer or any of its aliases" → TRUE
+
+Your response MUST follow this format:
+{
+  "judgment": true/false,
+  "explanation": "One clear sentence explaining why the answers are compatible or contradictory."
+}
+"""
+
+  # 3. Rendu Jinja2 : Injecte les vraies variables dans le prompt
+  rendered_prompt = Template(TRUE_FALSE_PROMPT).render(
+      query=query,
+      expected_answer=expected_answer,
+      answer_aliases=answer_aliases,
+      generated_answer=generated_answer,
+  )
+
+  # 4. Construction des messages pour le chat template
+  messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a strict evaluator. Do NOT generate any reasoning, thinking process, or preamble. "
+                "Respond ONLY with a JSON object."
+            ),
+        },
+        {"role": "user", "content": rendered_prompt},
     ]
-    messages[-1]['content'] = '''Your task is to determine whether the output contains hallucination. Follow these guidelines strictly:
 
-Fluency Check: If the output is not fluent natural language (e.g., it contains garbled or unreadable text), it should be considered hallucinated.
-
-Relevance Check: If the output contains many correct facts but does not directly answer the question, it should be considered hallucinated.
-
-Support Check: If the output cannot be inferred from any of the reference answers, or contains information inconsistent with the reference answers, it should be considered hallucinated.
-
-Exact Match Rule: If the output is supported by any one of the reference correct answers, it should be considered not hallucinated.
-
-Semantic Match Rule: If the output is not directly supported by any reference answer, but is semantically similar (i.e., expresses the same meaning), it should be considered not hallucinated.
-
-Unknown Answer Rule: If the reference answers include phrases like "This question cannot be answered", then an output like "I don't know" or "Cannot answer this question" should be considered not hallucinated.'''
-
-    messages.append({'role': 'assistant',
-                     'content': 'I understand. Please provide the question and the bot\'s answer.'})
-    messages.append({'role': 'user', 'content': ''})
-
-
-    user_input_for_judging = f"Question:{sample['question'].strip()}\n\nThe correct answer example is as follow:\n"
-    if isinstance(sample['label'], str):
-        user_input_for_judging += f"{sample['label'].strip()}\n"
-    else:
-        for example_answer in sample['label']:
-            if isinstance(example_answer, str):
-                user_input_for_judging += f"{example_answer.strip()}\n"
-            elif isinstance(example_answer, list):
-                user_input_for_judging += ', '.join([example_answer[0].strip()]) + '\n'
-
-    user_input_for_judging += f"\nThe bot replied as follow:\n{sample['answer'].strip()}\n\nNow please judge whether the bot's answer is hallucinated or not. If it is hallucinated, please answer \"yes\", otherwise answer \"no\". Dont show thinking and put your answer in <answer> </answer>.\n"
-    messages[-1]['content'] = user_input_for_judging
-    return messages
+  return messages
 
 def get_collapse_prompt(sample):
     messages = [
@@ -351,49 +418,130 @@ def run_mode_collapse_pipeline(results, model, tokenizer, batch_size=16):
         tokenizer.padding_side = original_padding_side
 
     return results
+import gc
+import json
+import os
+import re
+import time
+import torch
 
 
-def compute_correctness_truthfulqa(answer_path, model, tokenizer, batch_size=16, skip_qwen_on_collapse=True):
-    with open(answer_path, "r", encoding="utf-8") as f:
-        results = json.load(f)
+def compute_correctness_truthfulqa(
+    answer_path, model, tokenizer, batch_size=4
+):  # Réduit à 4 (ou 8) pour éviter l'OOM
+  with open(answer_path, "r", encoding="utf-8") as f:
+    raw = f.read().strip()
+  if not raw:
+    raise ValueError(f"Empty JSON file: {answer_path}")
+  try:
+    results = json.loads(raw)
+  except json.JSONDecodeError as e:
+    raise ValueError(f"Invalid JSON in {answer_path}: {e}") from e
 
-    total = len(results)
-    print(f"[eval] Processing TruthfulQA/Factoid style: {total} samples", flush=True)
+  total = len(results)
+  print(
+      f"[eval] Starting evaluation of {total} samples (batch_size={batch_size})",
+      flush=True,
+  )
+  t0 = time.time()
 
-    # Lancement du pipeline unifié de détection de collapse
-    results = run_mode_collapse_pipeline(results, model, tokenizer, batch_size)
+  prompts = []
+  for sample in results:
+    messages = get_prompt(sample)
+    prompt = tokenizer.apply_chat_template(
+        messages, add_generation_prompt=True, tokenize=False, enable_thinking=False
+    )
+    prompts.append(prompt)
 
-    # Jugement de factualité
-    judge_indices = [i for i in range(total) if results[i]["is_mode_collapse"] == "no"] if skip_qwen_on_collapse else list(range(total))
-    
-    prompts = [tokenizer.apply_chat_template(get_prompt(results[i]), add_generation_prompt=True, tokenize=False) for i in judge_indices]
-    correctness = [0] * total
+  original_padding_side = tokenizer.padding_side
+  tokenizer.padding_side = "left"
+  if tokenizer.pad_token_id is None:
+    tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # On pré-remplit les effondrements de mode comme des échecs (0)
-    for i in range(total):
-        if results[i]["is_mode_collapse"] == "yes":
-            results[i]['is_hallucination'] = "yes"
-            correctness[i] = 0
+  correctness = [0] * total
 
-    for batch_start in range(0, len(judge_indices), batch_size):
-        batch_end = min(batch_start + batch_size, len(judge_indices))
-        batch_prompts = prompts[batch_start:batch_end]
-        batch_indices = judge_indices[batch_start:batch_end]
+  for batch_start in range(0, total, batch_size):
+    batch_end = min(batch_start + batch_size, total)
+    batch_prompts = prompts[batch_start:batch_end]
 
-        inputs = tokenizer(batch_prompts, return_tensors="pt", padding=True, truncation=True).to(model.device)
-        with torch.no_grad():
-            output_ids = model.generate(**inputs, do_sample=False, max_new_tokens=32)
+    inputs = tokenizer(
+        batch_prompts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+    ).to(model.device)
 
-        input_len = inputs["input_ids"].shape[1]
-        for i, idx in enumerate(batch_indices):
-            generated_tokens = output_ids[i][input_len:]
-            output_text = extract_answer(tokenizer.decode(generated_tokens, skip_special_tokens=True).strip().lower())
+    with torch.no_grad():
+      output_ids = model.generate(
+          **inputs,
+          do_sample=False,
+          max_new_tokens=128,  # 128 tokens suffisent largement pour le JSON
+          pad_token_id=tokenizer.pad_token_id,
+      )
 
-            results[idx]['is_hallucination'] = "yes" if "yes" in output_text else "no"
-            correctness[idx] = 1 if "no" in output_text else 0
+    input_len = inputs["input_ids"].shape[1]
+    for i, idx in enumerate(range(batch_start, batch_end)):
+      generated_tokens = output_ids[i][input_len:]
+      decoded_str = tokenizer.decode(
+          generated_tokens, skip_special_tokens=True
+      ).strip()
 
-    save_eval_file(answer_path, results)
-    return correctness
+      output_dict = extract_answer(decoded_str)
+
+      judgment = output_dict.get("judgment", "unclear")
+      explanation = output_dict.get("explanation", "")
+
+      if judgment == "false":
+        results[idx]["is_hallucination"] = "yes"
+        results[idx]["explanation"] = explanation
+        correctness[idx] = 0
+      elif judgment == "true":
+        results[idx]["is_hallucination"] = "no"
+        results[idx]["explanation"] = explanation
+        correctness[idx] = 1
+      else:
+        results[idx]["is_hallucination"] = "unclear"
+        results[idx]["explanation"] = explanation
+        correctness[idx] = 0
+
+    # --- NETTOYAGE OBLIGATOIRE DE LA VRAM ---
+    del inputs, output_ids
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    # Progress log
+    elapsed = time.time() - t0
+    done = batch_end
+    speed = done / elapsed if elapsed > 0 else 0
+    eta = (total - done) / speed if speed > 0 else 0
+    acc_so_far = sum(correctness[:done]) / done if done > 0 else 0
+    print(
+        f"[eval] {done}/{total} ({done*100//total}%) | "
+        f"acc={acc_so_far:.2%} | {elapsed:.1f}s elapsed | ETA {eta:.0f}s",
+        flush=True,
+    )
+
+  tokenizer.padding_side = original_padding_side
+
+  print(
+      f"[eval] Done. Final accuracy: {sum(correctness)/total:.2%} in"
+      f" {time.time()-t0:.1f}s",
+      flush=True,
+  )
+
+  eval_dir = os.path.abspath(
+      os.path.join(os.path.dirname(answer_path), "..", "eval")
+  )
+  os.makedirs(eval_dir, exist_ok=True)
+
+  eval_filename = os.path.basename(answer_path)
+  eval_path = os.path.join(eval_dir, eval_filename)
+
+  with open(eval_path, "w", encoding="utf-8") as f:
+    json.dump(results, f, indent=2, ensure_ascii=False)
+
+  return correctness
+
 
 
 def compute_correctness_sciqa(answer_path, model, tokenizer, batch_size=16):
@@ -435,11 +583,52 @@ def save_eval_file(answer_path, results):
     with open(os.path.join(eval_dir, os.path.basename(answer_path)), "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
+import json
+import re
 
-def extract_answer(text):
-    match = re.search(r"<answer>(.*?)</answer>", text, flags=re.DOTALL | re.IGNORECASE)
-    return match.group(1).strip() if match else text
+def extract_answer(text: str) -> dict:
+  """Extrait le jugement et l'explication depuis le texte de l'évaluateur.
 
+  Si un JSON valide est trouvé, ses champs sont renvoyés.
+  Sinon, tout le texte généré est placé dans 'explanation' avec un jugement
+  'unclear'.
+  """
+  if not text or not isinstance(text, str):
+    return {
+        "judgment": "unclear",
+        "explanation": "Empty or invalid input text",
+    }
+
+  # Recherche du premier bloc JSON { ... } dans le texte
+  json_match = re.search(r"\{.*\}", text, re.DOTALL)
+  if json_match:
+    try:
+      response_dict = json.loads(json_match.group(0))
+
+      if isinstance(response_dict, dict) and "judgment" in response_dict:
+        raw_judgment = response_dict["judgment"]
+
+        # Normalisation de judgment (booléen ou string -> "true" / "false")
+        if isinstance(raw_judgment, bool):
+          judgment_str = "true" if raw_judgment else "false"
+        elif isinstance(raw_judgment, str):
+          judgment_str = raw_judgment.strip().lower()
+          if judgment_str not in ["true", "false"]:
+            judgment_str = "unclear"
+        else:
+          judgment_str = "unclear"
+
+        return {
+            "judgment": judgment_str,
+            "explanation": response_dict.get(
+                "explanation", "No explanation provided"
+            ),
+        }
+    except json.JSONDecodeError:
+      pass
+
+  # Pas de JSON valide trouvé : renvoie tout le texte généré
+  return {"judgment": "unclear", "explanation": text.strip()}
 
 # =========================================================================
 # EXACT-MATCH / TOKEN-OVERLAP LABELING (TDGNet-style, no LLM judge)
