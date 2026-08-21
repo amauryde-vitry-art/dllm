@@ -21,6 +21,7 @@ class BaseSamplerOutputCompleteHistory:
     histories_logprobs: list[torch.Tensor] | None = None
     histories_unmask_logprobs: list[torch.Tensor] | None = None
     histories_mask: list[torch.Tensor] | None = None
+    histories_accepted: list[torch.Tensor] | None = None
     histories_remasking: list[torch.Tensor] | None = None
     histories_H: list[torch.Tensor] | None = None
     histories_entropy: list[torch.Tensor] | None = None

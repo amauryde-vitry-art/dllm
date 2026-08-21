@@ -191,6 +191,12 @@ CONFIGS = {
         "tokenizer_path": "PipelineTest/res/results_llada_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
         "name": "llada_16steps_32tokens_naturalquestion_2500samples_evalqwen_seed42",
     },
+    "diffgemma16_32tokens_2500samples_triviaqa_evalqwen_seed42": {
+            "outputs_path": "PipelineTest/res/results_diffgemma_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_diffgemma_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+            "eval_json": "PipelineTest/res/eval/results_triviaqa_diffgemma_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
+            "tokenizer_path": "PipelineTest/res/results_diffgemma_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_diffgemma_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+            "name": "diffgemma_16steps_32tokens_triviaqa_2500samples_evalqwen_seed42",
+        },
     "llada16_32tokens_2500samples_triviaqa_evalqwen_seed42": {
         "outputs_path": "PipelineTest/res/results_llada_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
         "eval_json": "PipelineTest/res/eval/results_triviaqa_llada_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",

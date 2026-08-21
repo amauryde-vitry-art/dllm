@@ -2,13 +2,17 @@ import sys
 import os
 import json
 import argparse
+from time import time
 import numpy as np
 import torch
 import torch.distributed as dist
 import transformers
 from dataclasses import dataclass
 
+from dllm.pipelines.diffusiongemma.sampler import DiffusionGemmaSamplerWithCompleteHistory, DiffusionGemmaSamplerConfig
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+from PipelineTest.sampling.sample_answers_without_collapse import GemmaSamplerConfig
 import dllm
 from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score
 from PipelineTest.scripts.run_evaluation import CONFIGS
@@ -76,24 +80,77 @@ def generate_and_evaluate_nli_parallel(model_type: str, generation_steps: int, m
     if seed is not None:
         transformers.set_seed(seed + rank)
 
-    if model_type.lower() == "llada":
-        model_path = "GSAI-ML/LLaDA-8B-Instruct"
-        sampler_config = SamplerConfig(steps=generation_steps, max_new_tokens=max_new_tokens, temperature=temperature)
-        sampler_cls = dllm.core.samplers.MDLMSampler
-    elif model_type.lower() == "dream":
-        model_path = "Dream-org/Dream-v0-Instruct-7B"
-        sampler_config = DreamSamplerConfig(steps=generation_steps, max_new_tokens=max_new_tokens, temperature=temperature)
-        sampler_cls = dllm.pipelines.dream.sampler.DreamSampler
-    else:
-        raise ValueError("model_type doit être 'llada' ou 'dream'")
+    processor = None
+    m_type = model_type.lower()
 
-    resolved_path = dllm.utils.resolve_with_base_env(model_path, "BASE_MODELS_DIR")
+    if m_type == "llada":
+        model_path = "GSAI-ML/LLaDA-8B-Instruct"
+        sampler_config = SamplerConfig(
+            steps=generation_steps,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            block_size=max_new_tokens,
+            remasking="low_confidence",
+        )
+        sampler_cls = dllm.core.samplers.MDLMSampler
+    elif m_type == "dream":
+        model_path = "Dream-org/Dream-v0-Instruct-7B"
+        sampler_config = DreamSamplerConfig(
+            steps=generation_steps,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+        )
+        sampler_cls = dllm.pipelines.dream.sampler.DreamSampler
+    elif m_type in ["diffgemma", "diffusiongemma"]:
+        model_path = "google/diffusiongemma-26B-A4B-it"
+        sampler_config = GemmaSamplerConfig(
+            steps=generation_steps,
+            max_new_tokens=max_new_tokens,
+            canvas_length=max_new_tokens,
+        )
+        sampler_cls = DiffusionGemmaSamplerWithCompleteHistory
+    else:
+        raise ValueError(f"model_type inconnu: {model_type}")
+
+    resolved_path = dllm.utils.resolve_with_base_env(
+      model_path, "BASE_MODELS_DIR"
+  )
     print(f"[rank {rank}] Loading generation model: {resolved_path}...", flush=True)
-    model = dllm.utils.get_model(
-        model_name_or_path=resolved_path,
-        device_map={"": local_rank} if torch.cuda.is_available() else None,
-    ).eval()
-    tokenizer = dllm.utils.get_tokenizer(model_name_or_path=resolved_path)
+
+    
+    if m_type in ["diffgemma", "diffusiongemma"]:
+        from transformers import AutoProcessor, DiffusionGemmaForBlockDiffusion
+        processor = AutoProcessor.from_pretrained(resolved_path)
+        tokenizer = processor.tokenizer
+        device_map = {
+        "model.encoder.language_model.embed_tokens": 0,
+        "model.decoder.embed_tokens": 0,
+        "model.encoder.vision_tower": 0,
+        "model.encoder.embed_vision": 0,
+        "model.decoder.self_conditioning": 0,
+        "lm_head": 0,
+        "model.encoder.language_model.norm": 1,
+        "model.decoder.norm": 1,
+    }
+        for i in range(30):
+            gpu = 0 if i < 15 else 1
+            device_map[f"model.encoder.language_model.layers.{i}"] = gpu
+            device_map[f"model.decoder.layers.{i}"] = gpu
+
+        model = DiffusionGemmaForBlockDiffusion.from_pretrained(
+            resolved_path, torch_dtype=torch.bfloat16, device_map=device_map
+        ).eval()
+    else:
+        model = dllm.utils.get_model(
+            model_name_or_path=resolved_path,
+            device_map={"": local_rank} if torch.cuda.is_available() else None,
+        ).eval()
+
+        tokenizer = dllm.utils.get_tokenizer(model_name_or_path=resolved_path)
+
+    if hasattr(model, "config") and not hasattr(model.config, "use_cache"):
+        model.config.use_cache = False
+    
     sampler = sampler_cls(model=model, tokenizer=tokenizer)
 
     shard_indices = list(range(rank, len(messages), world_size))
@@ -107,8 +164,19 @@ def generate_and_evaluate_nli_parallel(model_type: str, generation_steps: int, m
         for start_idx in range(0, len(shard_messages), batch_size):
             end_idx = min(start_idx + batch_size, len(shard_messages))
             batch_messages = shard_messages[start_idx:end_idx]
+             # Pour LLaDA / Dream / Samplers standards
+            
+            formatted_prompts = [
+                tokenizer.apply_chat_template(
+                    msg, add_generation_prompt=True, tokenize=False
+                )
+                for msg in batch_messages
+            ]
 
-            inputs = tokenizer.apply_chat_template(batch_messages, add_generation_prompt=True, tokenize=True)
+            inputs = [
+                    tokenizer.encode(p, return_tensors="pt").squeeze(0).to(model.device)
+                    for p in formatted_prompts
+                ]
             outputs = sampler.sample(inputs, sampler_config, return_dict=True)
             flat_sequences = dllm.utils.sample_trim(tokenizer, outputs.sequences.tolist(), inputs)
 
@@ -116,9 +184,13 @@ def generate_and_evaluate_nli_parallel(model_type: str, generation_steps: int, m
                 shard_results[msg[0]['content']].append(flat_sequences[idx])
 
     # Nettoyage de la mémoire du LLM pour libérer de la place pour DeBERTa
+   # Nettoyage de la mémoire du LLM pour libérer de la place pour DeBERTa
     del model, sampler
+    if processor is not None:
+        del processor
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()  # <--- AJOUTER CETTE SYNCHRONISATION
 
     # 2. Pipeline NLI sur le GPU local
     print(f"[rank {rank}] Initializing NLI pipeline (DeBERTa) on GPU {local_rank}...", flush=True)
@@ -140,9 +212,19 @@ def generate_and_evaluate_nli_parallel(model_type: str, generation_steps: int, m
         json.dump(shard_detailed, f)
     print(f"[rank {rank}] Saved detailed NLI shard ({len(shard_detailed)} prompts)", flush=True)
 
+    # Synchronisation par fichier (contourne les erreurs NCCL/CUDA)
     if world_size > 1:
-        # Correction du warning NCCL en spécifiant explicitement le device_id local
-        dist.barrier(device_ids=[local_rank] if torch.cuda.is_available() else None)
+      if rank != 0:
+        flag_file = os.path.join(tmp_dir, f"_done_rank{rank}.flag")
+        with open(flag_file, "w") as f:
+          f.write("done")
+      else:
+        for r in range(1, world_size):
+          flag_file = os.path.join(tmp_dir, f"_done_rank{r}.flag")
+          while not os.path.exists(flag_file):
+            time.sleep(1.0)
+          if os.path.exists(flag_file):
+            os.remove(flag_file)
 
     # 5. Fusion finale sur le rank 0
     if rank == 0:
@@ -165,6 +247,7 @@ def _build_nli_pipeline(local_rank):
         device_str = f"cuda:{local_rank}"
         pipeline_device = local_rank
         dtype = torch.float16  # Parfaitement stable pour DeBERTa-v2-xlarge sur RTX 6000 Ada
+        torch.backends.cudnn.enabled = False
     else:
         device_str = "cpu"
         pipeline_device = -1  # -1 indique à Hugging Face d'utiliser le CPU
@@ -317,7 +400,14 @@ def run_config(config_name, n_variants=10, balance_seed=42, nli_batch_size=64):
     eval_json = cfg["eval_json"]
     rank, world_size, local_rank = _init_distributed()
 
-    is_dream = "dream" in config_name.lower()
+    # --- CORRECTION DE LA DÉTECTION DU MODÈLE ---
+    cfg_lower = config_name.lower()
+    if "diffgemma" in cfg_lower or "gemma" in cfg_lower or cfg.get("sampler") == "diffgemma":
+        model_type = "diffgemma"
+    elif "dream" in cfg_lower or cfg.get("sampler") == "dream":
+        model_type = "dream"
+    else:
+        model_type = "llada"
 
     if rank == 0:
         print(f"\n{'='*70}")
@@ -345,7 +435,6 @@ def run_config(config_name, n_variants=10, balance_seed=42, nli_batch_size=64):
 
     balanced_prompts = [[{"role": "user", "content": idx_to_prompt[int(idx)]}] for idx in indices_balanced]
 
-    model_type = "dream" if "dream" in config_name.lower() else "llada"
     steps = 16 if "16" in config_name else (128 if "128" in config_name else 16)
     tokens = 32 if "32" in config_name else (128 if "128" in config_name else 32)
 
