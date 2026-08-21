@@ -7,6 +7,8 @@ import re
 from collections import Counter
 from tqdm import tqdm
 import time
+from openai import OpenAI
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # =========================================================================
 # MODE COLLAPSE DETECTION (heuristic, independent of Qwen)
@@ -418,6 +420,7 @@ def run_mode_collapse_pipeline(results, model, tokenizer, batch_size=16):
         tokenizer.padding_side = original_padding_side
 
     return results
+
 import gc
 import json
 import os
@@ -427,121 +430,115 @@ import torch
 
 
 def compute_correctness_truthfulqa(
-    answer_path, model, tokenizer, batch_size=4
-):  # Réduit à 4 (ou 8) pour éviter l'OOM
-  with open(answer_path, "r", encoding="utf-8") as f:
-    raw = f.read().strip()
-  if not raw:
-    raise ValueError(f"Empty JSON file: {answer_path}")
-  try:
-    results = json.loads(raw)
-  except json.JSONDecodeError as e:
-    raise ValueError(f"Invalid JSON in {answer_path}: {e}") from e
+    answer_path,
+    client: OpenAI,
+    model_name: str,
+    max_concurrent_requests: int = 16,
+    max_new_tokens: int = 128,
+    max_retries: int = 3,
+):
+    with open(answer_path, "r", encoding="utf-8") as f:
+        raw = f.read().strip()
+    if not raw:
+        raise ValueError(f"Empty JSON file: {answer_path}")
+    try:
+        results = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in {answer_path}: {e}") from e
 
-  total = len(results)
-  print(
-      f"[eval] Starting evaluation of {total} samples (batch_size={batch_size})",
-      flush=True,
-  )
-  t0 = time.time()
-
-  prompts = []
-  for sample in results:
-    messages = get_prompt(sample)
-    prompt = tokenizer.apply_chat_template(
-        messages, add_generation_prompt=True, tokenize=False, enable_thinking=False
-    )
-    prompts.append(prompt)
-
-  original_padding_side = tokenizer.padding_side
-  tokenizer.padding_side = "left"
-  if tokenizer.pad_token_id is None:
-    tokenizer.pad_token_id = tokenizer.eos_token_id
-
-  correctness = [0] * total
-
-  for batch_start in range(0, total, batch_size):
-    batch_end = min(batch_start + batch_size, total)
-    batch_prompts = prompts[batch_start:batch_end]
-
-    inputs = tokenizer(
-        batch_prompts,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-    ).to(model.device)
-
-    with torch.no_grad():
-      output_ids = model.generate(
-          **inputs,
-          do_sample=False,
-          max_new_tokens=128,  # 128 tokens suffisent largement pour le JSON
-          pad_token_id=tokenizer.pad_token_id,
-      )
-
-    input_len = inputs["input_ids"].shape[1]
-    for i, idx in enumerate(range(batch_start, batch_end)):
-      generated_tokens = output_ids[i][input_len:]
-      decoded_str = tokenizer.decode(
-          generated_tokens, skip_special_tokens=True
-      ).strip()
-
-      output_dict = extract_answer(decoded_str)
-
-      judgment = output_dict.get("judgment", "unclear")
-      explanation = output_dict.get("explanation", "")
-
-      if judgment == "false":
-        results[idx]["is_hallucination"] = "yes"
-        results[idx]["explanation"] = explanation
-        correctness[idx] = 0
-      elif judgment == "true":
-        results[idx]["is_hallucination"] = "no"
-        results[idx]["explanation"] = explanation
-        correctness[idx] = 1
-      else:
-        results[idx]["is_hallucination"] = "unclear"
-        results[idx]["explanation"] = explanation
-        correctness[idx] = 0
-
-    # --- NETTOYAGE OBLIGATOIRE DE LA VRAM ---
-    del inputs, output_ids
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    # Progress log
-    elapsed = time.time() - t0
-    done = batch_end
-    speed = done / elapsed if elapsed > 0 else 0
-    eta = (total - done) / speed if speed > 0 else 0
-    acc_so_far = sum(correctness[:done]) / done if done > 0 else 0
+    total = len(results)
     print(
-        f"[eval] {done}/{total} ({done*100//total}%) | "
-        f"acc={acc_so_far:.2%} | {elapsed:.1f}s elapsed | ETA {eta:.0f}s",
+        f"[eval] Starting evaluation of {total} samples "
+        f"(max_concurrent_requests={max_concurrent_requests})",
+        flush=True,
+    )
+    t0 = time.time()
+
+    correctness = [0] * total
+
+    def _judge_one(idx):
+        sample = results[idx]
+        messages = get_prompt(sample)
+
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    temperature=0.0,
+                    max_tokens=max_new_tokens,
+                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+
+                )
+                decoded_str = response.choices[0].message.content.strip()
+                return idx, decoded_str, None
+            except Exception as e:
+                last_err = e
+                time.sleep(1.5 * (attempt + 1))  # backoff simple
+        return idx, "", last_err
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=max_concurrent_requests) as executor:
+        futures = [executor.submit(_judge_one, idx) for idx in range(total)]
+
+        for future in as_completed(futures):
+            idx, decoded_str, err = future.result()
+
+            if err is not None:
+                # Requête définitivement échouée après retries -> traité comme "unclear"
+                print(f"[eval] WARNING sample {idx} failed after retries: {err}", flush=True)
+                results[idx]["is_hallucination"] = "unclear"
+                results[idx]["explanation"] = f"eval_error: {err}"
+                correctness[idx] = 0
+            else:
+                output_dict = extract_answer(decoded_str)
+                judgment = output_dict.get("judgment", "unclear")
+                explanation = output_dict.get("explanation", "")
+
+                if judgment == "false":
+                    results[idx]["is_hallucination"] = "yes"
+                    results[idx]["explanation"] = explanation
+                    correctness[idx] = 0
+                elif judgment == "true":
+                    results[idx]["is_hallucination"] = "no"
+                    results[idx]["explanation"] = explanation
+                    correctness[idx] = 1
+                else:
+                    results[idx]["is_hallucination"] = "unclear"
+                    results[idx]["explanation"] = explanation
+                    correctness[idx] = 0
+
+            done += 1
+            if done % max_concurrent_requests == 0 or done == total:
+                elapsed = time.time() - t0
+                speed = done / elapsed if elapsed > 0 else 0
+                eta = (total - done) / speed if speed > 0 else 0
+                acc_so_far = sum(correctness[:done]) / done if done > 0 else 0
+                print(
+                    f"[eval] {done}/{total} ({done*100//total}%) | "
+                    f"acc~={acc_so_far:.2%} | {elapsed:.1f}s elapsed | ETA {eta:.0f}s",
+                    flush=True,
+                )
+
+    print(
+        f"[eval] Done. Final accuracy: {sum(correctness)/total:.2%} in"
+        f" {time.time()-t0:.1f}s",
         flush=True,
     )
 
-  tokenizer.padding_side = original_padding_side
+    eval_dir = os.path.abspath(
+        os.path.join(os.path.dirname(answer_path), "..", "eval")
+    )
+    os.makedirs(eval_dir, exist_ok=True)
 
-  print(
-      f"[eval] Done. Final accuracy: {sum(correctness)/total:.2%} in"
-      f" {time.time()-t0:.1f}s",
-      flush=True,
-  )
+    eval_filename = os.path.basename(answer_path)
+    eval_path = os.path.join(eval_dir, eval_filename)
 
-  eval_dir = os.path.abspath(
-      os.path.join(os.path.dirname(answer_path), "..", "eval")
-  )
-  os.makedirs(eval_dir, exist_ok=True)
+    with open(eval_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
 
-  eval_filename = os.path.basename(answer_path)
-  eval_path = os.path.join(eval_dir, eval_filename)
-
-  with open(eval_path, "w", encoding="utf-8") as f:
-    json.dump(results, f, indent=2, ensure_ascii=False)
-
-  return correctness
-
+    return correctness
 
 
 def compute_correctness_sciqa(answer_path, model, tokenizer, batch_size=16):
