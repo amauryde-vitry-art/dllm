@@ -39,7 +39,7 @@ class GemmaSamplerConfig(DiffusionGemmaSamplerConfig):
     max_temperature: float = None
     min_temperature: float = None
     return_dict: bool = True
-    canvas_length: int = None
+    canvas_length: int = 64
 
 
 
