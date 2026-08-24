@@ -35,6 +35,7 @@ dependencies = [
     "faiss-cpu>=1.13.2",
     "lightgbm>=4.6.0",
     "xgboost>=3.2.0",
+    "openai>=2.32.0",
 ]
 
 [project.optional-dependencies]

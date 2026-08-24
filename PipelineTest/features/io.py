@@ -13,7 +13,7 @@ from dllm.core.samplers.base import BaseSamplerOutputCompleteHistory
 from GenerateBaseSamplerOutputsAndExtractInfo.PlotResults import PlotlyEntropy, PlotlyH, plotH, plotLogProbs, plotMasks, plotChanges, plotLevenshtein, plotAttentionMask, plotNumTransferredTokens, plotUnmaskLogProbs, PlotlyLogProbs, PlotlyUnmaskLogProbs, PlotlyChanges, PlotlySemanticBestLabels, getTxt, plotEntropy
 from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
-from PipelineTest.CreateMetrics import getInterceptCAndTauFromVarMaskedEntropyAcrossTokens
+from PipelineTest.historic_scripts.CreateMetrics import getInterceptCAndTauFromVarMaskedEntropyAcrossTokens
 
 
 
@@ -406,7 +406,7 @@ def plotEntropyAndLogProbsAcrossTime(list_index, entropies, logprobs, masks, k_t
         
 
 def GetInfoFromIndex(listIndex, tokenizer, ouputpath='PipelineTest/results/outputs_no_remasking.pt'):
-    from PipelineTest.CreateMetrics import getAlphaAndBetaFromEntropy
+    from PipelineTest.historic_scripts.CreateMetrics import getAlphaAndBetaFromEntropy
 
     outputs = mergeOutputsList(ouputpath)
     logprobs = getLogProbs(outputs)
@@ -527,7 +527,7 @@ def PlotScatterVarMaskedEntropyAcrossTokensVsAlphaEntropyAvg(correct_indices, fa
     Scatter plot: mean(Var(Entropy across diffusion steps)) vs mean(Var(logprobs across diffusion steps))
     Binary labels: correct (green) vs hallucinated (red).
     """
-    from PipelineTest.CreateMetrics import getAlphaBetaFromEntropyAvg, getFromOutputsVarEntropyMaskedAcrossTokens
+    from PipelineTest.historic_scripts.CreateMetrics import getAlphaBetaFromEntropyAvg, getFromOutputsVarEntropyMaskedAcrossTokens
 
     outputs = mergeOutputsList(ouputpath)
     sample_id = outputs.sample_indices.detach().cpu().numpy() if outputs.sample_indices is not None else np.arange(len(outputs.histories_entropy))
