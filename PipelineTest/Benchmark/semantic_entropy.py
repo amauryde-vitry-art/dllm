@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import transformers
 from dataclasses import dataclass
-
+import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 import dllm
 from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score
@@ -41,6 +41,32 @@ class ScriptArguments:
     visualize: bool = False
 
 
+# Registre model_type -> chemin du checkpoint, classe sampler, factory de SamplerConfig.
+# Le chargement des poids ne dépend QUE de model_type (llada/dream), jamais de
+# steps/max_new_tokens/block_size : ces derniers ne sont que des paramètres passés à
+# sampler.sample(...), pas des propriétés du modèle chargé.
+MODEL_REGISTRY = {
+    "llada": {
+        "model_path": "GSAI-ML/LLaDA-8B-Instruct",
+        "sampler_cls": dllm.core.samplers.MDLMSampler,
+        "make_sampler_config": lambda steps, tokens: SamplerConfig(
+            steps=steps, max_new_tokens=tokens, temperature=0.5, block_size=tokens
+        ),
+    },
+    "dream": {
+        "model_path": "Dream-org/Dream-v0-Instruct-7B",
+        "sampler_cls": dllm.pipelines.dream.sampler.DreamSampler,
+        "make_sampler_config": lambda steps, tokens: DreamSamplerConfig(
+            steps=steps, max_new_tokens=tokens, temperature=0.5
+        ),
+    },
+}
+
+
+def get_model_type(config_name: str) -> str:
+    return "dream" if "dream" in config_name.lower() else "llada"
+
+
 # =========================================================================
 # DISTRIBUTED HELPERS
 # =========================================================================
@@ -62,115 +88,46 @@ def _cleanup_distributed(world_size):
 
 
 # =========================================================================
-# GENERATION ET CALCUL NLI DISTRIBUÉ (OPTIMISÉ MULTI-GPU)
+# CHARGEMENT DES MODELES — fait UNE SEULE FOIS par model_type, et UNE SEULE
+# FOIS pour NLI sur tout le run (au lieu d'une fois par config, x24).
 # =========================================================================
-def generate_and_evaluate_nli_parallel(model_type: str, generation_steps: int, max_new_tokens: int, 
-                                      temperature: float, messages: list, N: int, seed: int = 42, 
-                                      batch_size: int = 8, nli_batch_size: int = 64):
-    """
-    Génère N variantes stochastiques ET calcule l'entropie sémantique par NLI en parallèle.
-    Chaque GPU s'occupe de son propre Shard du début à la fin (Génération -> NLI) sur sa propre VRAM.
-    """
-    rank, world_size, local_rank = _init_distributed()
-
-    if seed is not None:
-        transformers.set_seed(seed + rank)
-
-    if model_type.lower() == "llada":
-        model_path = "GSAI-ML/LLaDA-8B-Instruct"
-        sampler_config = SamplerConfig(steps=generation_steps, max_new_tokens=max_new_tokens, temperature=temperature)
-        sampler_cls = dllm.core.samplers.MDLMSampler
-    elif model_type.lower() == "dream":
-        model_path = "Dream-org/Dream-v0-Instruct-7B"
-        sampler_config = DreamSamplerConfig(steps=generation_steps, max_new_tokens=max_new_tokens, temperature=temperature)
-        sampler_cls = dllm.pipelines.dream.sampler.DreamSampler
-    else:
+def load_generation_backend(model_type: str, local_rank: int, rank: int):
+    """Charge model + tokenizer + sampler pour un model_type donné.
+    A appeler une seule fois par model_type (pas une fois par config)."""
+    model_type = model_type.lower()
+    if model_type not in MODEL_REGISTRY:
         raise ValueError("model_type doit être 'llada' ou 'dream'")
 
-    resolved_path = dllm.utils.resolve_with_base_env(model_path, "BASE_MODELS_DIR")
-    print(f"[rank {rank}] Loading generation model: {resolved_path}...", flush=True)
+    entry = MODEL_REGISTRY[model_type]
+    resolved_path = dllm.utils.resolve_with_base_env(entry["model_path"], "BASE_MODELS_DIR")
+    print(f"[rank {rank}] Loading generation model ({model_type}): {resolved_path}...", flush=True)
     model = dllm.utils.get_model(
         model_name_or_path=resolved_path,
         device_map={"": local_rank} if torch.cuda.is_available() else None,
     ).eval()
     tokenizer = dllm.utils.get_tokenizer(model_name_or_path=resolved_path)
-    sampler = sampler_cls(model=model, tokenizer=tokenizer)
+    sampler = entry["sampler_cls"](model=model, tokenizer=tokenizer)
+    return model, tokenizer, sampler, entry["make_sampler_config"]
 
-    shard_indices = list(range(rank, len(messages), world_size))
-    shard_messages = [messages[i] for i in shard_indices]
-    print(f"[rank {rank}/{world_size}] Assigned {len(shard_messages)} prompts for Gen + NLI", flush=True)
 
-    shard_results = {msg[0]['content']: [] for msg in shard_messages}
-
-    # 1. Génération des variantes
-    for v in range(N):
-        for start_idx in range(0, len(shard_messages), batch_size):
-            end_idx = min(start_idx + batch_size, len(shard_messages))
-            batch_messages = shard_messages[start_idx:end_idx]
-
-            inputs = tokenizer.apply_chat_template(batch_messages, add_generation_prompt=True, tokenize=True)
-            outputs = sampler.sample(inputs, sampler_config, return_dict=True)
-            flat_sequences = dllm.utils.sample_trim(tokenizer, outputs.sequences.tolist(), inputs)
-
-            for idx, msg in enumerate(batch_messages):
-                shard_results[msg[0]['content']].append(flat_sequences[idx])
-
-    # Nettoyage de la mémoire du LLM pour libérer de la place pour DeBERTa
+def unload_generation_backend(model, sampler):
     del model, sampler
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # 2. Pipeline NLI sur le GPU local
-    print(f"[rank {rank}] Initializing NLI pipeline (DeBERTa) on GPU {local_rank}...", flush=True)
-    nli_pipeline = _build_nli_pipeline(local_rank)
-
-    # 3. Calcul de l'entropie sémantique en local sur le shard
-    shard_detailed = calculate_semantic_entropy_nli(shard_results, nli_pipeline, nli_batch_size=nli_batch_size, rank=rank)
-
-    # Nettoyage final du pipeline NLI
-    del nli_pipeline
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    # 4. Sauvegarde temporaire du shard calculé
-    tmp_dir = "/tmp/semantic_entropy_shards"
-    os.makedirs(tmp_dir, exist_ok=True)
-    shard_path = os.path.join(tmp_dir, f"detailed_shard_rank{rank}.json")
-    with open(shard_path, "w", encoding="utf-8") as f:
-        json.dump(shard_detailed, f)
-    print(f"[rank {rank}] Saved detailed NLI shard ({len(shard_detailed)} prompts)", flush=True)
-
-    if world_size > 1:
-        # Correction du warning NCCL en spécifiant explicitement le device_id local
-        dist.barrier(device_ids=[local_rank] if torch.cuda.is_available() else None)
-
-    # 5. Fusion finale sur le rank 0
-    if rank == 0:
-        grouped_detailed = {}
-        for r in range(world_size):
-            p = os.path.join(tmp_dir, f"detailed_shard_rank{r}.json")
-            with open(p, "r", encoding="utf-8") as f:
-                shard = json.load(f)
-            grouped_detailed.update(shard)
-            if os.path.exists(p):
-                os.remove(p)
-        print(f"[rank 0] Merged {len(grouped_detailed)} processed prompts from {world_size} GPUs", flush=True)
-        return grouped_detailed
-    else:
-        return None
 
 def _build_nli_pipeline(local_rank):
-    """Initialise proprement le pipeline NLI DeBERTa-v2 sur le GPU ciblé via local_rank."""
+    """Initialise le pipeline NLI DeBERTa-v2 sur le GPU ciblé via local_rank.
+    Ne dépend d'aucun paramètre de config : à charger UNE SEULE FOIS pour tout le run."""
     if torch.cuda.is_available() and local_rank != -1:
         device_str = f"cuda:{local_rank}"
         pipeline_device = local_rank
-        dtype = torch.float16  # Parfaitement stable pour DeBERTa-v2-xlarge sur RTX 6000 Ada
+        dtype = torch.float16
     else:
         device_str = "cpu"
-        pipeline_device = -1  # -1 indique à Hugging Face d'utiliser le CPU
+        pipeline_device = -1
         dtype = torch.float32
 
-    # Utilisation de la version v2 de DeBERTa (XLarge est la version standard pour MNLI en v2)
     model_id = "microsoft/deberta-v2-xlarge-mnli"
 
     tok = transformers.AutoTokenizer.from_pretrained(model_id)
@@ -178,7 +135,6 @@ def _build_nli_pipeline(local_rank):
         model_id, torch_dtype=dtype
     )
 
-    # TRUC CLEF : Envoyer explicitement les poids du modèle sur le GPU alloué à ce Rank
     if device_str != "cpu":
         print(f"[rank {local_rank}] Moving DeBERTa weights to {device_str}...", flush=True)
         model = model.to(device_str)
@@ -187,18 +143,56 @@ def _build_nli_pipeline(local_rank):
         "text-classification",
         model=model,
         tokenizer=tok,
-        device=pipeline_device,  # Aligne le pipeline sur le même appareil
+        device=pipeline_device,
         truncation=True,
         max_length=256,
     )
     return pipeline_nli
 
 
+# =========================================================================
+# GENERATION DES VARIANTES — batchée sur (prompts x variantes) dans le MEME
+# batch, au lieu de boucler N fois sur des petits batches (cf. discussion :
+# le coût d'un sampler de diffusion dépend surtout de `steps`, pas du batch
+# tant qu'on n'est pas memory-bound => on amortit `steps` sur un batch plus
+# large plutôt que de le repayer N fois).
+# =========================================================================
+def generate_variants(tokenizer, sampler, sampler_config, messages: list, N: int, gen_batch_size: int = 32):
+    """Génère N variantes stochastiques pour chaque message."""
+    results = {msg[0]['content']: [] for msg in messages}
+
+    expanded_messages = []
+    expanded_keys = []
+    for msg in messages:
+        for _ in range(N):
+            expanded_messages.append(msg)
+            expanded_keys.append(msg[0]['content'])
+
+    with torch.inference_mode():
+        for start_idx in range(0, len(expanded_messages), gen_batch_size):
+            end_idx = min(start_idx + gen_batch_size, len(expanded_messages))
+            batch_messages = expanded_messages[start_idx:end_idx]
+            batch_keys = expanded_keys[start_idx:end_idx]
+
+            inputs = tokenizer.apply_chat_template(batch_messages, add_generation_prompt=True, tokenize=True)
+            outputs = sampler.sample(inputs, sampler_config, return_dict=True)
+            flat_sequences = dllm.utils.sample_trim(tokenizer, outputs.sequences.tolist(), inputs)
+
+            for key, seq in zip(batch_keys, flat_sequences):
+                results[key].append(seq)
+
+    return results
+
+
+# =========================================================================
+# NLI CLUSTERING / ENTROPIE SEMANTIQUE (inchangé sur le fond)
+# =========================================================================
 def _batched_entailment_flags(pairs, pipeline_nli, batch_size=64):
     if not pairs:
         return []
     inputs = [{"text": p, "text_pair": h} for p, h in pairs]
-    outputs = pipeline_nli(inputs, batch_size=batch_size)
+    with torch.inference_mode():
+        outputs = pipeline_nli(inputs, batch_size=batch_size)
     flags = []
     for out in outputs:
         res = out[0] if isinstance(out, list) else out
@@ -207,9 +201,9 @@ def _batched_entailment_flags(pairs, pipeline_nli, batch_size=64):
 
 
 def _partition_into_nli_clusters_batched(variants, pipeline_nli, batch_size=64):
-    clusters = []          
-    rep_index_of_cluster = []  
-    seen_text_to_cluster = {}  
+    clusters = []
+    rep_index_of_cluster = []
+    seen_text_to_cluster = {}
 
     for idx, text in enumerate(variants):
         stripped = text.strip()
@@ -282,6 +276,47 @@ def calculate_semantic_entropy_nli(dict_results, pipeline_nli, nli_batch_size=64
 
 
 # =========================================================================
+# GENERATION + NLI POUR UNE CONFIG — modèle et pipeline NLI déjà chargés,
+# passés en argument. Cette fonction ne fait plus AUCUN chargement/
+# déchargement de poids (c'était le principal bottleneck).
+# =========================================================================
+def generate_and_evaluate_nli_parallel(tokenizer, sampler, sampler_config, nli_pipeline,
+                                        messages: list, N: int, rank: int, world_size: int,
+                                        local_rank: int, seed: int = 42, gen_batch_size: int = 32,
+                                        nli_batch_size: int = 64):
+    """Génère N variantes stochastiques ET calcule l'entropie sémantique par NLI."""
+
+    if seed is not None:
+        transformers.set_seed(seed + rank)
+
+    shard_indices = list(range(rank, len(messages), world_size))
+    shard_messages = [messages[i] for i in shard_indices]
+    print(f"[rank {rank}/{world_size}] Assigned {len(shard_messages)} prompts for Gen + NLI", flush=True)
+
+    # 1. Génération des variantes (batchée sur prompts x variantes)
+    shard_results = generate_variants(tokenizer, sampler, sampler_config, shard_messages, N,
+                                       gen_batch_size=gen_batch_size)
+
+    # 2. Calcul de l'entropie sémantique en local sur le shard
+    shard_detailed = calculate_semantic_entropy_nli(shard_results, nli_pipeline, nli_batch_size=nli_batch_size, rank=rank)
+
+    # 3. Fusion inter-GPU par communication collective NCCL (plus d'aller-retour
+    #    disque via /tmp, qui était refait à chaque config).
+    if world_size > 1:
+        gathered = [None] * world_size
+        dist.all_gather_object(gathered, shard_detailed)
+        if rank == 0:
+            grouped_detailed = {}
+            for shard in gathered:
+                grouped_detailed.update(shard)
+            print(f"[rank 0] Merged {len(grouped_detailed)} processed prompts from {world_size} GPUs", flush=True)
+            return grouped_detailed
+        return None
+    else:
+        return shard_detailed
+
+
+# =========================================================================
 # METRIQUES STANDARDISÉES
 # =========================================================================
 def evaluate(scores, labels, name="SemanticEntropy"):
@@ -292,9 +327,11 @@ def evaluate(scores, labels, name="SemanticEntropy"):
     roc_auc = roc_auc_score(labels, scores)
     pr_auc = average_precision_score(labels, scores)
 
+    # Balayage de seuils vectorisé (au lieu de 201 appels sklearn en boucle Python)
     thresholds = np.linspace(scores.min(), scores.max(), 201)
-    accs = [accuracy_score(labels, (scores >= t).astype(int)) for t in thresholds]
-    best_acc = max(accs)
+    preds = (scores[:, None] >= thresholds[None, :]).astype(int)  # (n_samples, 201)
+    accs = (preds == labels[:, None]).mean(axis=0)
+    best_acc = float(accs.max())
 
     y_pred = (scores >= np.median(scores)).astype(int)
     acc = accuracy_score(labels, y_pred)
@@ -304,20 +341,19 @@ def evaluate(scores, labels, name="SemanticEntropy"):
         "test_roc_auc": float(roc_auc),
         "test_pr_auc": float(pr_auc),
         "test_accuracy": float(acc),
-        "test_best_accuracy": float(best_acc),
+        "test_best_accuracy": best_acc,
         "n_samples": len(labels),
     }
 
 
 # =========================================================================
-# EXECUTION
+# EXECUTION PAR CONFIG — modèle + NLI déjà chargés, passés en argument.
 # =========================================================================
-def run_config(config_name, n_variants=10, balance_seed=42, nli_batch_size=64):
+def run_config(config_name, tokenizer, sampler, make_sampler_config, nli_pipeline,
+                rank, world_size, local_rank,
+                n_variants=10, balance_seed=42, gen_batch_size=32, nli_batch_size=64):
     cfg = CONFIGS[config_name]
     eval_json = cfg["eval_json"]
-    rank, world_size, local_rank = _init_distributed()
-
-    is_dream = "dream" in config_name.lower()
 
     if rank == 0:
         print(f"\n{'='*70}")
@@ -335,37 +371,38 @@ def run_config(config_name, n_variants=10, balance_seed=42, nli_batch_size=64):
 
     labels_balanced = labels_raw
     indices_balanced = indices_raw
-    balance_stats = {
-        "n_pos_before": int(np.sum(labels_raw == 1)),
-        "n_neg_before": int(np.sum(labels_raw == 0)),
-        "n_kept_per_class": "N/A (Sequential Split)",
-    }
 
     train_idx, test_idx = get_train_test_split(len(labels_balanced))
 
     balanced_prompts = [[{"role": "user", "content": idx_to_prompt[int(idx)]}] for idx in indices_balanced]
 
-    model_type = "dream" if "dream" in config_name.lower() else "llada"
+    # NOTE: logique de parsing steps/tokens à partir du nom de config volontairement
+    # INCHANGEE par rapport à l'original (ne dépend pas du chargement modèle/NLI ;
+    # à vérifier séparément vis-à-vis de la vraie définition de CONFIGS, elle ne
+    # semble reconnaître que "16"/"128" pour steps et "32"/"128" pour tokens).
     steps = 16 if "16" in config_name else (128 if "128" in config_name else 16)
     tokens = 32 if "32" in config_name else (128 if "128" in config_name else 32)
 
-    # Appel de la fonction fusionnée (Génération + NLI répartis sur tous les GPUs)
+    sampler_config = make_sampler_config(steps, tokens)
+
     dict_detailed = generate_and_evaluate_nli_parallel(
-        model_type=model_type,
-        generation_steps=steps,
-        max_new_tokens=tokens,
-        temperature=0.5,
+        tokenizer=tokenizer,
+        sampler=sampler,
+        sampler_config=sampler_config,
+        nli_pipeline=nli_pipeline,
         messages=balanced_prompts,
         N=n_variants,
+        rank=rank,
+        world_size=world_size,
+        local_rank=local_rank,
         seed=42,
-        batch_size=8,
-        nli_batch_size=nli_batch_size
+        gen_batch_size=gen_batch_size,
+        nli_batch_size=nli_batch_size,
     )
 
     if rank != 0:
         return None
 
-    # À partir d'ici, seul le rank 0 traite les métriques agrégées globales
     scores_vector = np.array([dict_detailed[idx_to_prompt[int(idx)]]["semantic_entropy"] for idx in indices_balanced])
 
     test_scores = scores_vector[test_idx]
@@ -404,6 +441,9 @@ def parse_args():
     parser.add_argument("--n_variants", type=int, default=5)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--balance_seed", type=int, default=42)
+    parser.add_argument("--gen_batch_size", type=int, default=32,
+                         help="Taille totale de batch pour la génération (prompts x variantes confondus). "
+                              "A augmenter tant que la VRAM le permet.")
     parser.add_argument("--nli_batch_size", type=int, default=64,
                          help="Taille de batch pour DeBERTa NLI.")
     return parser.parse_args()
@@ -419,12 +459,52 @@ def main():
 
     configs_to_run = list(CONFIGS.keys()) if args.config == "all" else [args.config]
 
+    # Regroupe les configs par model_type pour ne charger chaque modèle génératif
+    # qu'UNE SEULE FOIS (au lieu d'une fois par config, x12). L'ordre relatif au
+    # sein de chaque groupe (steps/tokens/dataset) est préservé (tri stable).
+    configs_to_run = sorted(configs_to_run, key=get_model_type)
+
+    # Le pipeline NLI ne dépend d'aucun paramètre de config : chargé une seule fois
+    # pour tout le run (au lieu d'une fois par config, x24). Reste résident en VRAM
+    # à côté du modèle génératif courant — DeBERTa-xlarge est petit (~1.8GB en fp16)
+    # comparé aux modèles 7-8B, donc ça devrait passer sur la plupart des GPU. Si la
+    # VRAM est vraiment juste, on peut la recharger à chaque changement de
+    # model_type au lieu d'une seule fois pour tout le run.
+    print(f"[rank {rank}] Loading NLI pipeline (DeBERTa) once for the whole run...", flush=True)
+    nli_pipeline = _build_nli_pipeline(local_rank)
+
     all_results = {}
+    current_model_type = None
+    model = tokenizer = sampler = make_sampler_config = None
+
     for config_name in configs_to_run:
-        result = run_config(config_name, n_variants=args.n_variants, balance_seed=args.balance_seed,
-                             nli_batch_size=args.nli_batch_size)
+        model_type = get_model_type(config_name)
+
+        if model_type != current_model_type:
+            if model is not None:
+                unload_generation_backend(model, sampler)
+            model, tokenizer, sampler, make_sampler_config = load_generation_backend(model_type, local_rank, rank)
+            current_model_type = model_type
+
+        t0 = time.time()
+        result = run_config(
+            config_name, tokenizer, sampler, make_sampler_config, nli_pipeline,
+            rank, world_size, local_rank,
+            n_variants=args.n_variants, balance_seed=args.balance_seed,
+            gen_batch_size=args.gen_batch_size, nli_batch_size=args.nli_batch_size,
+        )
+        t1 = time.time()
+        if result is not None:
+            result['time'] = t1 - t0
+        print(f"  [INFO] Config '{config_name}' completed in {t1 - t0:.2f} seconds.")
         if rank == 0 and result is not None:
             all_results[config_name] = result
+
+    if model is not None:
+        unload_generation_backend(model, sampler)
+    del nli_pipeline
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     if rank == 0 and all_results:
         print(f"\n\n{'='*70}\n  SUMMARY TABLE : SEMANTIC ENTROPY (NLI INTERN PARALLEL)\n{'='*70}")

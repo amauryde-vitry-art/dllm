@@ -15,9 +15,9 @@ import seaborn as sns
 import numpy as np
 from scipy.stats import norm
 try:
-    from SemanticEntropy import build_token_to_cluster
+    from PipelineTest.historic_scripts.SemanticEntropy import build_token_to_cluster
 except ModuleNotFoundError:
-    from PipelineTest.SemanticEntropy import build_token_to_cluster
+    from PipelineTest.historic_scripts.SemanticEntropy import build_token_to_cluster
 from GenerateBaseSamplerOutputsAndExtractInfo.GetInfoFromBaseSamplerOutput import getEachStepProposedTokenIdSequence, getSemanticDispersion, getSemanticEntropy, getEachStepGeneratedSequence, getEntropyJustUnmasked
 
 from sklearn.linear_model import LogisticRegression
@@ -79,9 +79,9 @@ def compute_padding_mask_from_x0(outputs, positions, pad_token_id):
 def _load_outputs(output_path):
     # Lazy import avoids circular dependency with AnalyseResults.
     try:
-        from AnalyseResults import mergeOutputsList
+        from PipelineTest.historic_scripts.AnalyseResults import mergeOutputsList
     except ModuleNotFoundError:
-        from PipelineTest.AnalyseResults import mergeOutputsList
+        from PipelineTest.historic_scripts.AnalyseResults import mergeOutputsList
 
     return mergeOutputsList(output_path)
 

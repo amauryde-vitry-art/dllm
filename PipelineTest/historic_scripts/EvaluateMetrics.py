@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
-from CreateMetrics import getTestSimpleFeatures, getTestSimpleFeaturesEvaluation
+from PipelineTest.historic_scripts.CreateMetrics import getTestSimpleFeatures, getTestSimpleFeaturesEvaluation
 from sklearn.decomposition import PCA
 import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier

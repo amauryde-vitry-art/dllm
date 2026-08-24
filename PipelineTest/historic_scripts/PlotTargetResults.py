@@ -13,7 +13,7 @@ from GenerateBaseSamplerOutputsAndExtractInfo.PlotResults import PlotlyLogProbs
 
 import torch
 from sklearn.model_selection import train_test_split
-from PipelineTest.AnalyseResults import PlotDistributionTau, PlotPipeline, PlotMeanMaskedEntropyAcrossTokens, PlotScatterVarMaskedEntropyAcrossTokensVsAlphaEntropyAvg, PlotMeanVarMaskedAcrossTokens, mergeOutputsList, plotEntropyForSteps
+from PipelineTest.historic_scripts.AnalyseResults import PlotDistributionTau, PlotPipeline, PlotMeanMaskedEntropyAcrossTokens, PlotScatterVarMaskedEntropyAcrossTokensVsAlphaEntropyAvg, PlotMeanVarMaskedAcrossTokens, mergeOutputsList, plotEntropyForSteps
 
 OUTPUTS_PATH  = 'PipelineTest/res/DREAM_64steps_64tokens_maskgit/outputs_DREAM_64steps_64tokens_maskgit.pt'
 TOKENIZER_PATH = 'PipelineTest/res/DREAM_64steps_64tokens_maskgit/tokenizer_DREAM_64steps_64tokens_maskgit.pt'

@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from CreateMetrics import getTestSimpleFeatures, getAlphaBetaFromEntropyAvgStudy, getAlphaBetaFromEntropyAvgStudyv2
+from PipelineTest.historic_scripts.CreateMetrics import getTestSimpleFeatures, getAlphaBetaFromEntropyAvgStudy, getAlphaBetaFromEntropyAvgStudyv2
 from sklearn.decomposition import PCA
 import seaborn as sns
 
@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import roc_auc_score, average_precision_score
 
-from PipelineTest.AnalyseResults import mergeOutputsList
+from PipelineTest.historic_scripts.AnalyseResults import mergeOutputsList
 
 
 RESULTS_DIR = "PipelineTest/res/results_LLaDa_64steps_64tokens_entropy"

@@ -1,8 +1,9 @@
 """
-AR1 Per-Sample Visualization - NO PADDING
-==========================================
-Same as AR1_SamplePlots.py but excludes padding tokens.
-Padding = token where the model proposes pad_token_id at ALL masked steps (in histories_x0).
+AR1 Per-Sample Visualization
+==============================
+Pick ~10 random samples and plot per-step:
+  - Mean masked entropy (data vs AR1 reconstruction)
+  - Variance masked entropy (data vs AR1 reconstruction)
 """
 
 import numpy as np
@@ -10,21 +11,19 @@ import matplotlib.pyplot as plt
 import json
 import sys
 import os
-import torch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from scipy.stats import linregress
 from sklearn.model_selection import train_test_split
 from GenerateBaseSamplerOutputsAndExtractInfo.GetInfoFromBaseSamplerOutput import getEntropy, getEachStepMask
-from PipelineTest.AnalyseResults import mergeOutputsList
+from PipelineTest.historic_scripts.AnalyseResults import mergeOutputsList
 
 # =========================================================================
 # CONFIG
 # =========================================================================
-OUTPUTS_PATH = 'PipelineTest/res/LLADA_64steps_64tokens_lowconf/outputs_LLADA_64steps_64tokens_lowconf.pt'
-EVAL_JSON = 'PipelineTest/res/eval/results_triviaqa_LLADA_64steps_64tokens_lowconf.json'
-TOKENIZER_PATH = 'PipelineTest/res/LLADA_64steps_64tokens_lowconf/tokenizer_LLADA_64steps_64tokens_lowconf.pt'
+OUTPUTS_PATH = 'PipelineTest/res/DREAM_64steps_64tokens_maskgit/outputs_DREAM_64steps_64tokens_maskgit.pt'
+EVAL_JSON = 'PipelineTest/res/eval/results_triviaqa_DREAM_64steps_64tokens_maskgit.json'
 
 N_SAMPLES_TO_PLOT = 20
 
@@ -58,64 +57,9 @@ labels = np.array([s[1] for s in samples])
 print(f"    Total matched samples: {len(samples)} (correct={np.sum(labels==0)}, halluc={np.sum(labels==1)})")
 
 # =========================================================================
-# DETECT PADDING TOKENS (using tokenizer + proposed_sequence)
+# FIT AR1 (same split as AR1_TrainTest)
 # =========================================================================
-print("[2] Detecting padding tokens (tokenizer-based)...")
-
-tokenizer = torch.load(TOKENIZER_PATH, map_location="cpu", weights_only=False)
-pad_token_id = tokenizer.pad_token_id
-print(f"    Pad token: '{tokenizer.pad_token}' (id={pad_token_id})")
-
-
-def compute_padding_mask_from_x0(outputs, positions, pad_token_id):
-    """
-    For each sample, identify padding tokens by checking the proposed_sequence (histories_x0).
-    A token d is padding if the model proposes the pad token at that position
-    at ALL steps where the token is still masked.
-    
-    Returns: padding (N, D) where True = padding (to exclude)
-    """
-    N = len(positions)
-    T = len(outputs.histories_x0)
-    D = outputs.max_new_tokens
-    
-    padding = np.zeros((N, D), dtype=bool)
-    
-    for idx_n, pos in enumerate(positions):
-        start_idx = outputs.start_idx_history[pos]
-        
-        for d in range(D):
-            masked_steps = []
-            for t in range(T):
-                if outputs.histories_mask[t][pos, start_idx + d].item() > 0:
-                    masked_steps.append(t)
-            
-            if len(masked_steps) == 0:
-                continue
-            
-            all_padding = True
-            for t in masked_steps:
-                proposed_token = outputs.histories_x0[t][pos, start_idx + d].item()
-                if proposed_token != pad_token_id:
-                    all_padding = False
-                    break
-            
-            if all_padding:
-                padding[idx_n, d] = True
-    
-    return padding
-
-
-padding_2d_all = compute_padding_mask_from_x0(outputs, positions, pad_token_id)
-
-n_padding_per_sample = padding_2d_all.sum(axis=1)
-print(f"    Padding tokens per sample: mean={n_padding_per_sample.mean():.1f}, "
-      f"min={n_padding_per_sample.min()}, max={n_padding_per_sample.max()}")
-
-# =========================================================================
-# FIT AR1 (same split as AR1_TrainTest_NoPadding)
-# =========================================================================
-print("[3] Splitting and fitting AR1 (no padding)...")
+print("[2] Splitting and fitting AR1...")
 ar1_idx, logreg_idx = train_test_split(
     np.arange(len(samples)), test_size=0.5, stratify=labels, random_state=42
 )
@@ -129,17 +73,8 @@ ar1_halluc_pos = ar1_positions[ar1_labels == 1]
 entropy_train_correct = np.array([entropies[i] for i in ar1_correct_pos])
 entropy_train_halluc = np.array([entropies[i] for i in ar1_halluc_pos])
 
-# Padding for AR1 fitting half
-padding_ar1 = padding_2d_all[ar1_idx]
-padding_ar1_correct = padding_ar1[ar1_labels == 0]
-padding_ar1_halluc = padding_ar1[ar1_labels == 1]
 
-
-def fit_ar1_model_no_padding(entropy_tensor, padding_2d):
-    """
-    Fit AR(1) per-token, excluding padding tokens.
-    padding_2d: (N, D) where True = padding
-    """
+def fit_ar1_model(entropy_tensor):
     N, T, D = entropy_tensor.shape
     phi = np.zeros((T, D))
     intercept = np.zeros((T, D))
@@ -148,33 +83,26 @@ def fit_ar1_model_no_padding(entropy_tensor, padding_2d):
         X_prev = entropy_tensor[:, t-1, :]
         X_curr = entropy_tensor[:, t, :]
         for d in range(D):
-            valid = ~padding_2d[:, d]
-            n_valid = np.sum(valid)
-            if n_valid < 3:
-                continue
-            x = X_prev[valid, d]
-            y = X_curr[valid, d]
-            slope, intcpt, _, _, _ = linregress(x, y)
+            slope, intcpt, _, _, _ = linregress(X_prev[:, d], X_curr[:, d])
             phi[t, d] = slope
             intercept[t, d] = intcpt
-            sigma[t, d] = np.std(y - (slope * x + intcpt))
+            sigma[t, d] = np.std(X_curr[:, d] - (slope * X_prev[:, d] + intcpt))
     return phi, intercept, sigma
 
 
-phi_correct, intercept_correct, sigma_correct = fit_ar1_model_no_padding(
-    entropy_train_correct, padding_ar1_correct)
-phi_halluc, intercept_halluc, sigma_halluc = fit_ar1_model_no_padding(
-    entropy_train_halluc, padding_ar1_halluc)
-print("    AR1 models fitted (no padding).")
+phi_correct, intercept_correct, sigma_correct = fit_ar1_model(entropy_train_correct)
+phi_halluc, intercept_halluc, sigma_halluc = fit_ar1_model(entropy_train_halluc)
+print("    AR1 models fitted.")
 
 # =========================================================================
-# SELECT SAMPLES FROM LOGREG HALF
+# SELECT SAMPLES FROM LOGREG HALF (test set, not used for AR1 fitting)
 # =========================================================================
-print(f"[4] Selecting {N_SAMPLES_TO_PLOT} samples from logreg half...")
+print(f"[3] Selecting {N_SAMPLES_TO_PLOT} samples from logreg half...")
 
 logreg_positions = positions[logreg_idx]
 logreg_labels = labels[logreg_idx]
 
+# Get the original JSON indices for the logreg half
 logreg_orig_indices = set()
 by_index = {d["index"]: d for d in data}
 for d in data:
@@ -184,6 +112,7 @@ for d in data:
         if pos in set(logreg_positions):
             logreg_orig_indices.add(idx)
 
+# Filter correct/halluc to only logreg half, then shuffle
 correct_sample_indices = [d["index"] for d in data if d["is_hallucination"] == 'no' and d["index"] in logreg_orig_indices]
 halluc_sample_indices = [d["index"] for d in data if d["is_hallucination"] == 'yes' and d["index"] in logreg_orig_indices]
 np.random.seed(42)
@@ -194,14 +123,12 @@ n_per_cat = N_SAMPLES_TO_PLOT // 2
 selected_correct = correct_sample_indices[:n_per_cat]
 selected_halluc = halluc_sample_indices[:n_per_cat]
 
+# Map to positions and labels
 selected_all = [(idx, 0) for idx in selected_correct] + [(idx, 1) for idx in selected_halluc]
 plot_positions = np.array([hmap[idx] for idx, _ in selected_all])
 plot_labels = np.array([lbl for _, lbl in selected_all])
 
-# Get padding for plot samples (find their index in `positions` array)
-pos_to_idx = {pos: i for i, pos in enumerate(positions)}
-plot_padding = np.array([padding_2d_all[pos_to_idx[pos]] for pos in plot_positions])
-
+# Build question titles (truncated)
 plot_questions = []
 for idx, _ in selected_all:
     q = by_index[idx].get("question", "")
@@ -209,11 +136,13 @@ for idx, _ in selected_all:
     plot_questions.append(q)
 
 print(f"    Picked {np.sum(plot_labels==0)} correct + {np.sum(plot_labels==1)} hallucination samples")
+print(f"    First correct indices: {selected_correct[:5]}")
+print(f"    First halluc indices: {selected_halluc[:5]}")
 
 # =========================================================================
-# PLOT [4]: Mean/Var masked entropy (excluding padding)
+# COMPUTE PER-SAMPLE STATS AND PLOT
 # =========================================================================
-print("[5] Generating plots (no padding)...")
+print("[4] Generating plots...")
 
 save_dir = os.path.join(os.path.dirname(OUTPUTS_PATH), "AnalyseResults")
 os.makedirs(save_dir, exist_ok=True)
@@ -224,13 +153,13 @@ for plot_idx in range(len(plot_positions)):
     pos = plot_positions[plot_idx]
     lbl = plot_labels[plot_idx]
     label_str = "Correct" if lbl == 0 else "Hallucination"
-    pad_d = plot_padding[plot_idx]  # (D,) bool
 
     entropy_sample = np.array(entropies[pos])
     mask_sample = np.array(masks[pos], dtype=float)
 
     T, D = entropy_sample.shape
 
+    # Compute per-step stats: data + recon with correct model + recon with halluc model
     mean_data = np.zeros(T)
     var_data = np.zeros(T)
     mean_recon_correct = np.zeros(T)
@@ -239,8 +168,7 @@ for plot_idx in range(len(plot_positions)):
     var_recon_halluc = np.zeros(T)
 
     for t in range(T):
-        # Effective mask: masked AND not padding
-        m = (mask_sample[t, :] > 0) & (~pad_d)
+        m = mask_sample[t, :] > 0
         n_masked = np.sum(m)
         if n_masked > 0:
             vals = entropy_sample[t, m]
@@ -248,90 +176,103 @@ for plot_idx in range(len(plot_positions)):
             var_data[t] = np.var(vals) if n_masked > 1 else 0.0
 
             if t == 0:
+                # Initial condition: use actual data
                 mean_recon_correct[t] = mean_data[t]
                 var_recon_correct[t] = var_data[t]
                 mean_recon_halluc[t] = mean_data[t]
                 var_recon_halluc[t] = var_data[t]
             else:
                 x_prev = entropy_sample[t-1, :]
+                # Reconstruction with correct model
                 x_pred_c = phi_correct[t, :] * x_prev + intercept_correct[t, :]
                 vals_c = x_pred_c[m]
                 mean_recon_correct[t] = np.mean(vals_c)
                 var_recon_correct[t] = np.var(vals_c) if n_masked > 1 else 0.0
-
+                # Reconstruction with hallucination model
                 x_pred_h = phi_halluc[t, :] * x_prev + intercept_halluc[t, :]
                 vals_h = x_pred_h[m]
                 mean_recon_halluc[t] = np.mean(vals_h)
                 var_recon_halluc[t] = np.var(vals_h) if n_masked > 1 else 0.0
 
     steps = np.arange(T)
-    n_pad = int(np.sum(pad_d))
 
+    # Mean plot
     ax = axes[plot_idx, 0]
     ax.plot(steps, mean_data, 'o-', color='blue', markersize=3, label='Data')
-    ax.plot(steps, mean_recon_correct, 's--', color='green', markersize=3, label='AR1 Recon (correct)')
-    ax.plot(steps, mean_recon_halluc, '^--', color='red', markersize=3, label='AR1 Recon (halluc)')
-    ax.set_title(f"Sample {plot_idx+1} [{label_str}] {plot_questions[plot_idx]} — Mean (pad={n_pad})", fontweight='bold')
+    ax.plot(steps, mean_recon_correct, 's--', color='green', markersize=3, label='AR1 Recon (correct model)')
+    ax.plot(steps, mean_recon_halluc, '^--', color='red', markersize=3, label='AR1 Recon (halluc model)')
+    ax.set_title(f"Sample {plot_idx+1} [{label_str}] {plot_questions[plot_idx]} — Mean Masked Entropy", fontweight='bold')
     ax.set_xlabel("Diffusion Step")
-    ax.set_ylabel("Mean Entropy (masked, no pad)")
+    ax.set_ylabel("Mean Entropy (masked tokens)")
     ax.legend(fontsize=8)
     ax.grid(True)
 
+    # Variance plot
     ax = axes[plot_idx, 1]
     ax.plot(steps, var_data, 'o-', color='blue', markersize=3, label='Data')
-    ax.plot(steps, var_recon_correct, 's--', color='green', markersize=3, label='AR1 Recon (correct)')
-    ax.plot(steps, var_recon_halluc, '^--', color='red', markersize=3, label='AR1 Recon (halluc)')
-    ax.set_title(f"Sample {plot_idx+1} [{label_str}] {plot_questions[plot_idx]} — Var (pad={n_pad})", fontweight='bold')
+    ax.plot(steps, var_recon_correct, 's--', color='green', markersize=3, label='AR1 Recon (correct model)')
+    ax.plot(steps, var_recon_halluc, '^--', color='red', markersize=3, label='AR1 Recon (halluc model)')
+    ax.set_title(f"Sample {plot_idx+1} [{label_str}] {plot_questions[plot_idx]} — Var Masked Entropy", fontweight='bold')
     ax.set_xlabel("Diffusion Step")
-    ax.set_ylabel("Variance Entropy (masked, no pad)")
+    ax.set_ylabel("Variance Entropy (masked tokens)")
     ax.legend(fontsize=8)
     ax.grid(True)
 
-plt.suptitle("Per-Sample: Data vs AR1 Reconstruction (Masked, No Padding)", fontsize=14, fontweight='bold', y=1.001)
+plt.suptitle("Per-Sample: Data vs AR1 Reconstruction (Masked Tokens)", fontsize=14, fontweight='bold', y=1.001)
 plt.tight_layout()
-save_path = os.path.join(save_dir, "AR1_PerSample_MeanVar_NoPadding.png")
+save_path = os.path.join(save_dir, "AR1_PerSample_MeanVar.png")
 plt.savefig(save_path, dpi=150, bbox_inches='tight')
 plt.show()
 print(f"    Saved: {save_path}")
 
 # =========================================================================
-# PLOT [5]: 64th unmasked token (excluding padding tokens from order)
+# PLOT: Entropy of the 60th unmasked token over time
 # =========================================================================
-print("[6] Generating 64th-unmasked-token plots (no padding)...")
+print("[5] Generating 64th-unmasked-token plots...")
 
-TOKEN_RANK = 64
+TOKEN_RANK = 64  # 64th token to be unmasked
 
+# Use same samples as above
 fig, axes = plt.subplots(len(plot_positions), 1, figsize=(14, 4 * len(plot_positions)))
 
 for plot_idx in range(len(plot_positions)):
     pos = plot_positions[plot_idx]
     lbl = plot_labels[plot_idx]
     label_str = "Correct" if lbl == 0 else "Hallucination"
-    pad_d = plot_padding[plot_idx]
 
-    entropy_sample = np.array(entropies[pos])
-    mask_sample = np.array(masks[pos], dtype=float)
+    entropy_sample = np.array(entropies[pos])  # (T, D)
+    mask_sample = np.array(masks[pos], dtype=float)  # (T, D)
     T, D = entropy_sample.shape
 
-    unmask_step = np.full(D, T)
+    # Find unmasking order: for each token d, find the step where it gets unmasked
+    # (first step t where mask[t-1,d]=1 and mask[t,d]=0)
+    unmask_step = np.full(D, T)  # default: never unmasked
     for d in range(D):
         for t in range(1, T):
             if mask_sample[t-1, d] == 1 and mask_sample[t, d] == 0:
                 unmask_step[d] = t
                 break
 
-    # Filter: unmasked AND not padding
-    valid_tokens = np.where((unmask_step < T) & (~pad_d))[0]
+    # Filter out tokens that were never masked (unmask_step == T)
+    valid_tokens = np.where(unmask_step < T)[0]
     valid_unmask = unmask_step[valid_tokens]
     token_order = valid_tokens[np.argsort(valid_unmask)]
+    
+    if len(token_order) < D:
+        # Add never-unmasked tokens at the end
+        never_unmasked = np.where(unmask_step == T)[0]
+        token_order = np.concatenate([token_order, never_unmasked])
 
-    if len(token_order) < TOKEN_RANK:
-        target_token = token_order[-1] if len(token_order) > 0 else 0
+
+    if TOKEN_RANK == 64:
+        target_token = token_order[63]
     else:
-        target_token = token_order[TOKEN_RANK - 1]
+        target_token = token_order[TOKEN_RANK - 1] 
 
+    # Extract entropy trajectory for this token
     entropy_data = entropy_sample[:, target_token]
 
+    # AR1 reconstruction for this token
     recon_correct = np.zeros(T)
     recon_halluc_model = np.zeros(T)
     recon_correct[0] = entropy_data[0]
@@ -344,26 +285,26 @@ for plot_idx in range(len(plot_positions)):
 
     ax = axes[plot_idx]
     ax.plot(steps, entropy_data, 'o-', color='blue', markersize=3, label='Data')
-    ax.plot(steps, recon_correct, 's--', color='green', markersize=3, label='AR1 Recon (correct)')
-    ax.plot(steps, recon_halluc_model, '^--', color='red', markersize=3, label='AR1 Recon (halluc)')
+    ax.plot(steps, recon_correct, 's--', color='green', markersize=3, label='AR1 Recon (correct model)')
+    ax.plot(steps, recon_halluc_model, '^--', color='red', markersize=3, label='AR1 Recon (halluc model)')
     ax.axvline(x=unmask_step[target_token], color='gray', linestyle=':', alpha=0.7, label=f'Unmask step={unmask_step[target_token]}')
-    ax.set_title(f"Sample {plot_idx+1} [{label_str}] {plot_questions[plot_idx]} — {TOKEN_RANK}th unmasked (no pad, d={target_token})", fontweight='bold')
+    ax.set_title(f"Sample {plot_idx+1} [{label_str}] {plot_questions[plot_idx]} — Entropy of {TOKEN_RANK}th unmasked token (d={target_token})", fontweight='bold')
     ax.set_xlabel("Diffusion Step")
     ax.set_ylabel("Entropy")
     ax.legend(fontsize=8)
     ax.grid(True)
 
-plt.suptitle(f"Per-Sample: {TOKEN_RANK}th Unmasked Token (No Padding) — Data vs AR1", fontsize=14, fontweight='bold', y=1.001)
+plt.suptitle(f"Per-Sample: Entropy of {TOKEN_RANK}th Unmasked Token — Data vs AR1", fontsize=14, fontweight='bold', y=1.001)
 plt.tight_layout()
-save_path_token = os.path.join(save_dir, f"AR1_PerSample_Token{TOKEN_RANK}_NoPadding.png")
+save_path_token = os.path.join(save_dir, f"AR1_PerSample_Token{TOKEN_RANK}.png")
 plt.savefig(save_path_token, dpi=150, bbox_inches='tight')
 plt.show()
 print(f"    Saved: {save_path_token}")
 
 # =========================================================================
-# PLOT [6]: 10 token trajectories (excluding padding)
+# PLOT: 10 token trajectories — correct model vs halluc model side by side
 # =========================================================================
-print("[7] Generating 10-token trajectory plots (no padding)...")
+print("[6] Generating 10-token trajectory plots (correct vs halluc model)...")
 
 N_TOKENS_TRAJ = 10
 colors_tokens = plt.cm.tab10(np.linspace(0, 1, N_TOKENS_TRAJ))
@@ -374,12 +315,12 @@ for plot_idx in range(len(plot_positions)):
     pos = plot_positions[plot_idx]
     lbl = plot_labels[plot_idx]
     label_str = "Correct" if lbl == 0 else "Hallucination"
-    pad_d = plot_padding[plot_idx]
 
-    entropy_sample = np.array(entropies[pos])
-    mask_sample = np.array(masks[pos], dtype=float)
+    entropy_sample = np.array(entropies[pos])  # (T, D)
+    mask_sample = np.array(masks[pos], dtype=float)  # (T, D)
     T, D = entropy_sample.shape
 
+    # Unmasking order
     unmask_step = np.full(D, T)
     for d in range(D):
         for t in range(1, T):
@@ -387,11 +328,11 @@ for plot_idx in range(len(plot_positions)):
                 unmask_step[d] = t
                 break
 
-    # Only non-padding tokens
-    valid_tokens = np.where((unmask_step < T) & (~pad_d))[0]
+    valid_tokens = np.where(unmask_step < T)[0]
     valid_unmask = unmask_step[valid_tokens]
     token_order = valid_tokens[np.argsort(valid_unmask)]
 
+    # Pick N_TOKENS_TRAJ tokens evenly spaced in the unmasking order
     if len(token_order) >= N_TOKENS_TRAJ:
         pick_indices = np.linspace(0, len(token_order) - 1, N_TOKENS_TRAJ, dtype=int)
         selected_tokens = token_order[pick_indices]
@@ -400,7 +341,7 @@ for plot_idx in range(len(plot_positions)):
 
     steps = np.arange(T)
 
-    # Left: correct model
+    # Left: correct model reconstruction
     ax_left = axes[plot_idx, 0]
     for k, tok_d in enumerate(selected_tokens):
         entropy_data = entropy_sample[:, tok_d]
@@ -413,13 +354,13 @@ for plot_idx in range(len(plot_positions)):
         ax_left.plot(steps, recon, '--', color=colors_tokens[k], linewidth=1.5,
                      label=f'd={tok_d} (unmask={unmask_step[tok_d]})')
 
-    ax_left.set_title(f"Sample {plot_idx+1} [{label_str}] — Correct model (no pad)", fontweight='bold')
+    ax_left.set_title(f"Sample {plot_idx+1} [{label_str}] — Correct model recon", fontweight='bold')
     ax_left.set_xlabel("Diffusion Step")
     ax_left.set_ylabel("Entropy")
     ax_left.legend(fontsize=6, ncol=2)
     ax_left.grid(True)
 
-    # Right: halluc model
+    # Right: hallucination model reconstruction
     ax_right = axes[plot_idx, 1]
     for k, tok_d in enumerate(selected_tokens):
         entropy_data = entropy_sample[:, tok_d]
@@ -432,15 +373,15 @@ for plot_idx in range(len(plot_positions)):
         ax_right.plot(steps, recon, '--', color=colors_tokens[k], linewidth=1.5,
                       label=f'd={tok_d} (unmask={unmask_step[tok_d]})')
 
-    ax_right.set_title(f"Sample {plot_idx+1} [{label_str}] — Halluc model (no pad)", fontweight='bold')
+    ax_right.set_title(f"Sample {plot_idx+1} [{label_str}] — Halluc model recon", fontweight='bold')
     ax_right.set_xlabel("Diffusion Step")
     ax_right.set_ylabel("Entropy")
     ax_right.legend(fontsize=6, ncol=2)
     ax_right.grid(True)
 
-plt.suptitle("Per-Sample: 10 Token Trajectories (No Padding) — Data (solid) vs AR1 (dashed)", fontsize=14, fontweight='bold', y=1.001)
+plt.suptitle("Per-Sample: 10 Token Trajectories — Data (solid) vs AR1 Recon (dashed)", fontsize=14, fontweight='bold', y=1.001)
 plt.tight_layout()
-save_path_traj = os.path.join(save_dir, "AR1_PerSample_10Tokens_CorrectVsHalluc_NoPadding.png")
+save_path_traj = os.path.join(save_dir, "AR1_PerSample_10Tokens_CorrectVsHalluc.png")
 plt.savefig(save_path_traj, dpi=150, bbox_inches='tight')
 plt.show()
 print(f"    Saved: {save_path_traj}")

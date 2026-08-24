@@ -11,7 +11,7 @@ import torch.distributed as dist
 import dllm
 from dllm.pipelines.dream import DreamSamplerWithCompleteHistory
 from dataclasses import dataclass
-from load_data import load_triviaqa
+from PipelineTest.historic_scripts.load_data import load_triviaqa
 
 
 
@@ -156,7 +156,7 @@ def SampleAnswerTrivaQA(sampler, num_sample, batch_size, suffix, sampler_config_
     with open(local_results_path, "w", encoding="utf-8") as f:
         json.dump(local_results, f, indent=2, ensure_ascii=False)
 
-    from metric_qwen import load_qwen, compute_correctness_truthfulqa
+    from PipelineTest.historic_scripts.metric_qwen import load_qwen, compute_correctness_truthfulqa
 
     print(f"[rank {rank}] Loading Qwen evaluator on cuda:{rank}...", flush=True)
     tokenizer_qwen, model_qwen = load_qwen(device=rank)
@@ -194,7 +194,7 @@ def SampleAnswerTrivaQA(sampler, num_sample, batch_size, suffix, sampler_config_
 
     # Rank 0 merges everything into final artifacts
     if rank == 0:
-        from AnalyseResults import mergeOutputsList, _pad_and_cat_tensors
+        from PipelineTest.historic_scripts.AnalyseResults import mergeOutputsList, _pad_and_cat_tensors
         from dllm.core.samplers.base import BaseSamplerOutputCompleteHistory
         from dataclasses import fields as dc_fields
 

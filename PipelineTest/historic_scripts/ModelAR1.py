@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import json
 from GenerateBaseSamplerOutputsAndExtractInfo.GetInfoFromBaseSamplerOutput import getEntropy, getEachStepMask
-from PipelineTest.AnalyseResults import mergeOutputsList
+from PipelineTest.historic_scripts.AnalyseResults import mergeOutputsList
 
 # df_mean_entropy = pd.read_csv('PipelineTest/res/DREAM_64steps_64tokens_maskgit/AnalyseResults/VarAndMeanEntropy.csv')
 

@@ -42,39 +42,39 @@ CONFIGS = {
     # CONFIGURATIONS : 16 STEPS / 32 TOKENS (Existantes)
     # =========================================================================
     "dream16_32tokens_2500samples_triviaqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_triviaqa_dream_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_16steps_32tokens_triviaqa_2500samples_seed42/outputs_dream_16steps_32tokens_triviaqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_16steps_32tokens_triviaqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_16steps_32tokens_triviaqa_2500samples_seed42/tokenizer_dream_16steps_32tokens_triviaqa_2500samples_seed42.pt",
         "name": "dream_16steps_32tokens_triviaqa_2500samples_evalqwen_seed42",
     },
     "llada16_32tokens_2500samples_naturalquestion_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_naturalquestion_llada_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_16steps_32tokens_naturalquestion_2500samples_seed42/outputs_llada_16steps_32tokens_naturalquestion_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_16steps_32tokens_naturalquestion_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_16steps_32tokens_naturalquestion_2500samples_seed42/tokenizer_llada_16steps_32tokens_naturalquestion_2500samples_seed42.pt",
         "name": "llada_16steps_32tokens_naturalquestion_2500samples_evalqwen_seed42",
     },
     "llada16_32tokens_2500samples_triviaqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_triviaqa_llada_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_16steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_16steps_32tokens_triviaqa_2500samples_seed42/outputs_llada_16steps_32tokens_triviaqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_16steps_32tokens_triviaqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_16steps_32tokens_triviaqa_2500samples_seed42/tokenizer_llada_16steps_32tokens_triviaqa_2500samples_seed42.pt",
         "name": "llada_16steps_32tokens_triviaqa_2500samples_evalqwen_seed42",
     },
     "dream16_32tokens_2500samples_naturalquestion_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_naturalquestion_dream_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_16steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_16steps_32tokens_naturalquestion_2500samples_seed42/outputs_dream_16steps_32tokens_naturalquestion_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_16steps_32tokens_naturalquestion_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_16steps_32tokens_naturalquestion_2500samples_seed42/tokenizer_dream_16steps_32tokens_naturalquestion_2500samples_seed42.pt",
         "name": "dream_16steps_32tokens_naturalquestion_2500samples_evalqwen_seed42",
     },
     "llada16_32tokens_2500samples_hotpotqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_hotpotqa_llada_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_16steps_32tokens_hotpotqa_2500samples_seed42/outputs_llada_16steps_32tokens_hotpotqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_16steps_32tokens_hotpotqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_16steps_32tokens_hotpotqa_2500samples_seed42/tokenizer_llada_16steps_32tokens_hotpotqa_2500samples_seed42.pt",
         "name": "llada_16steps_32tokens_hotpotqa_2500samples_evalqwen_seed42",
     },
     "dream16_32tokens_2500samples_hotpotqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_hotpotqa_dream_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_16steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_16steps_32tokens_hotpotqa_2500samples_seed42/outputs_dream_16steps_32tokens_hotpotqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_16steps_32tokens_hotpotqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_16steps_32tokens_hotpotqa_2500samples_seed42/tokenizer_dream_16steps_32tokens_hotpotqa_2500samples_seed42.pt",
         "name": "dream_16steps_32tokens_hotpotqa_2500samples_evalqwen_seed42",
     },
 
@@ -82,39 +82,39 @@ CONFIGS = {
     # CONFIGURATIONS : 32 STEPS / 64 TOKENS (Nouvelles)
     # =========================================================================
     "dream32_64tokens_2500samples_triviaqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_triviaqa_dream_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_32steps_64tokens_triviaqa_2500samples_seed42/outputs_dream_32steps_64tokens_triviaqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_32steps_64tokens_triviaqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_32steps_64tokens_triviaqa_2500samples_seed42/tokenizer_dream_32steps_64tokens_triviaqa_2500samples_seed42.pt",
         "name": "dream_32steps_64tokens_triviaqa_2500samples_evalqwen_seed42",
     },
     "llada32_64tokens_2500samples_naturalquestion_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_naturalquestion_llada_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_32steps_64tokens_naturalquestion_2500samples_seed42/outputs_llada_32steps_64tokens_naturalquestion_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_32steps_64tokens_naturalquestion_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_32steps_64tokens_naturalquestion_2500samples_seed42/tokenizer_llada_32steps_64tokens_naturalquestion_2500samples_seed42.pt",
         "name": "llada_32steps_64tokens_naturalquestion_2500samples_evalqwen_seed42",
     },
     "llada32_64tokens_2500samples_triviaqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_triviaqa_llada_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_32steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_32steps_64tokens_triviaqa_2500samples_seed42/outputs_llada_32steps_64tokens_triviaqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_32steps_64tokens_triviaqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_32steps_64tokens_triviaqa_2500samples_seed42/tokenizer_llada_32steps_64tokens_triviaqa_2500samples_seed42.pt",
         "name": "llada_32steps_64tokens_triviaqa_2500samples_evalqwen_seed42",
     },
     "dream32_64tokens_2500samples_naturalquestion_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_naturalquestion_dream_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_32steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_32steps_64tokens_naturalquestion_2500samples_seed42/outputs_dream_32steps_64tokens_naturalquestion_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_32steps_64tokens_naturalquestion_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_32steps_64tokens_naturalquestion_2500samples_seed42/tokenizer_dream_32steps_64tokens_naturalquestion_2500samples_seed42.pt",
         "name": "dream_32steps_64tokens_naturalquestion_2500samples_evalqwen_seed42",
     },
     "llada32_64tokens_2500samples_hotpotqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_hotpotqa_llada_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_32steps_64tokens_hotpotqa_2500samples_seed42/outputs_llada_32steps_64tokens_hotpotqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_32steps_64tokens_hotpotqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_32steps_64tokens_hotpotqa_2500samples_seed42/tokenizer_llada_32steps_64tokens_hotpotqa_2500samples_seed42.pt",
         "name": "llada_32steps_64tokens_hotpotqa_2500samples_evalqwen_seed42",
     },
     "dream32_64tokens_2500samples_hotpotqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_hotpotqa_dream_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_32steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_32steps_64tokens_hotpotqa_2500samples_seed42/outputs_dream_32steps_64tokens_hotpotqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_32steps_64tokens_hotpotqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_32steps_64tokens_hotpotqa_2500samples_seed42/tokenizer_dream_32steps_64tokens_hotpotqa_2500samples_seed42.pt",
         "name": "dream_32steps_64tokens_hotpotqa_2500samples_evalqwen_seed42",
     },
 
@@ -122,39 +122,39 @@ CONFIGS = {
     # CONFIGURATIONS : 32 STEPS / 32 TOKENS 
     # =========================================================================
     "dream32_32tokens_2500samples_triviaqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_triviaqa_dream_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_32steps_32tokens_triviaqa_2500samples_seed42/outputs_dream_32steps_32tokens_triviaqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_32steps_32tokens_triviaqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_32steps_32tokens_triviaqa_2500samples_seed42/tokenizer_dream_32steps_32tokens_triviaqa_2500samples_seed42.pt",
         "name": "dream_32steps_32tokens_triviaqa_2500samples_evalqwen_seed42",
     },
     "llada32_32tokens_2500samples_naturalquestion_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_naturalquestion_llada_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_32steps_32tokens_naturalquestion_2500samples_seed42/outputs_llada_32steps_32tokens_naturalquestion_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_32steps_32tokens_naturalquestion_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_32steps_32tokens_naturalquestion_2500samples_seed42/tokenizer_llada_32steps_32tokens_naturalquestion_2500samples_seed42.pt",
         "name": "llada_32steps_32tokens_naturalquestion_2500samples_evalqwen_seed42",
     },
     "llada32_32tokens_2500samples_triviaqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_triviaqa_llada_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_32steps_32tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_32steps_32tokens_triviaqa_2500samples_seed42/outputs_llada_32steps_32tokens_triviaqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_32steps_32tokens_triviaqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_32steps_32tokens_triviaqa_2500samples_seed42/tokenizer_llada_32steps_32tokens_triviaqa_2500samples_seed42.pt",
         "name": "llada_32steps_32tokens_triviaqa_2500samples_evalqwen_seed42",
     },
     "dream32_32tokens_2500samples_naturalquestion_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_naturalquestion_dream_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_32steps_32tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_32steps_32tokens_naturalquestion_2500samples_seed42/outputs_dream_32steps_32tokens_naturalquestion_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_32steps_32tokens_naturalquestion_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_32steps_32tokens_naturalquestion_2500samples_seed42/tokenizer_dream_32steps_32tokens_naturalquestion_2500samples_seed42.pt",
         "name": "dream_32steps_32tokens_naturalquestion_2500samples_evalqwen_seed42",
     },
     "llada32_32tokens_2500samples_hotpotqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_hotpotqa_llada_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_32steps_32tokens_hotpotqa_2500samples_seed42/outputs_llada_32steps_32tokens_hotpotqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_32steps_32tokens_hotpotqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_32steps_32tokens_hotpotqa_2500samples_seed42/tokenizer_llada_32steps_32tokens_hotpotqa_2500samples_seed42.pt",
         "name": "llada_32steps_32tokens_hotpotqa_2500samples_evalqwen_seed42",
     },
     "dream32_32tokens_2500samples_hotpotqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_hotpotqa_dream_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_32steps_32tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_32steps_32tokens_hotpotqa_2500samples_seed42/outputs_dream_32steps_32tokens_hotpotqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_32steps_32tokens_hotpotqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_32steps_32tokens_hotpotqa_2500samples_seed42/tokenizer_dream_32steps_32tokens_hotpotqa_2500samples_seed42.pt",
         "name": "dream_32steps_32tokens_hotpotqa_2500samples_evalqwen_seed42",
     },
 
@@ -162,39 +162,39 @@ CONFIGS = {
     # CONFIGURATIONS : 64 STEPS / 64 TOKENS 
     # =========================================================================
     "dream64_64tokens_2500samples_triviaqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_triviaqa_dream_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_64steps_64tokens_triviaqa_2500samples_seed42/outputs_dream_64steps_64tokens_triviaqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_64steps_64tokens_triviaqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_64steps_64tokens_triviaqa_2500samples_seed42/tokenizer_dream_64steps_64tokens_triviaqa_2500samples_seed42.pt",
         "name": "dream_64steps_64tokens_triviaqa_2500samples_evalqwen_seed42",
     },
     "llada64_64tokens_2500samples_naturalquestion_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_naturalquestion_llada_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_64steps_64tokens_naturalquestion_2500samples_seed42/outputs_llada_64steps_64tokens_naturalquestion_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_64steps_64tokens_naturalquestion_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_64steps_64tokens_naturalquestion_2500samples_seed42/tokenizer_llada_64steps_64tokens_naturalquestion_2500samples_seed42.pt",
         "name": "llada_64steps_64tokens_naturalquestion_2500samples_evalqwen_seed42",
     },
     "llada64_64tokens_2500samples_triviaqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_triviaqa_llada_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_64steps_64tokens_triviaqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_64steps_64tokens_triviaqa_2500samples_seed42/outputs_llada_64steps_64tokens_triviaqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_64steps_64tokens_triviaqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_64steps_64tokens_triviaqa_2500samples_seed42/tokenizer_llada_64steps_64tokens_triviaqa_2500samples_seed42.pt",
         "name": "llada_64steps_64tokens_triviaqa_2500samples_evalqwen_seed42",
     },
     "dream64_64tokens_2500samples_naturalquestion_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_naturalquestion_dream_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_64steps_64tokens_naturalquestion_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_64steps_64tokens_naturalquestion_2500samples_seed42/outputs_dream_64steps_64tokens_naturalquestion_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_64steps_64tokens_naturalquestion_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_64steps_64tokens_naturalquestion_2500samples_seed42/tokenizer_dream_64steps_64tokens_naturalquestion_2500samples_seed42.pt",
         "name": "dream_64steps_64tokens_naturalquestion_2500samples_evalqwen_seed42",
     },
     "llada64_64tokens_2500samples_hotpotqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_llada_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_llada_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_hotpotqa_llada_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_llada_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_llada_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_llada_64steps_64tokens_hotpotqa_2500samples_seed42/outputs_llada_64steps_64tokens_hotpotqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_llada_64steps_64tokens_hotpotqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_llada_64steps_64tokens_hotpotqa_2500samples_seed42/tokenizer_llada_64steps_64tokens_hotpotqa_2500samples_seed42.pt",
         "name": "llada_64steps_64tokens_hotpotqa_2500samples_evalqwen_seed42",
     },
     "dream64_64tokens_2500samples_hotpotqa_evalqwen_seed42": {
-        "outputs_path": "PipelineTest/res/results_dream_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/outputs_dream_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
-        "eval_json": "PipelineTest/res/eval/results_hotpotqa_dream_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.json",
-        "tokenizer_path": "PipelineTest/res/results_dream_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42/tokenizer_dream_64steps_64tokens_hotpotqa_2500samples_mixedtemp100-0_evalqwen_seed42.pt",
+        "outputs_path": "PipelineTest/res/results_dream_64steps_64tokens_hotpotqa_2500samples_seed42/outputs_dream_64steps_64tokens_hotpotqa_2500samples_seed42.pt",
+        "eval_json": "PipelineTest/res/eval/results_dream_64steps_64tokens_hotpotqa_2500samples_seed42.json",
+        "tokenizer_path": "PipelineTest/res/results_dream_64steps_64tokens_hotpotqa_2500samples_seed42/tokenizer_dream_64steps_64tokens_hotpotqa_2500samples_seed42.pt",
         "name": "dream_64steps_64tokens_hotpotqa_2500samples_evalqwen_seed42",
     },
 }
@@ -268,14 +268,7 @@ def run_logreg(X, y, feature_names, name, train_idx=None, test_idx=None):
     return result
 
 
-SIX_FEATURES = [
-    "MeanEntropy",
-    "MeanEntropyJustUnmasked",
-    "VarMaskedEntropyAcrossTokens",
-    "VarEntropyJustUnmasked",
-    "AlphaEntropy",
-    "AUC_V",
-]
+
 
 CLEANED_FEATURES = [
     "MeanMaskedEntropy",
@@ -357,11 +350,11 @@ def main(config_name="llada"):
 
     sample_indices = outputs.sample_indices.numpy()
     idx_to_pos = {int(idx): pos for pos, idx in enumerate(sample_indices)}
-    tensor_positions = [idx_to_pos[int(idx)] for idx in indices]
-
+    tensor_positions = [np.array(idx_to_pos[int(idx)]) for idx in indices]
+    print('uae  ujn,azfnjqmc')
     feat_baseline, names_baseline = getBaselineFeatures(outputs, tensor_positions)
     feat_markov, names_markov = getMarkovianFeatures(outputs, tensor_positions)
-
+    print('hereeee')
     # Combiner toutes les features pour pouvoir piocher dedans via select_features
     X_base_markov = np.column_stack([feat_baseline, feat_markov])
     names_bm = names_baseline + names_markov
@@ -378,11 +371,6 @@ def main(config_name="llada"):
     print("\n  === Baseline + Markovian ===")
     res_bm = run_logreg(X_base_markov, labels, names_bm, "Baseline+Markov", train_idx=train_idx, test_idx=test_idx)
 
-    # 6 selected features
-    X_6feat, names_6feat = select_features(X_base_markov, names_bm, SIX_FEATURES)
-    print("\n  === 6 Features (selected) ===")
-    print(f"  Features: {names_6feat}")
-    res_6feat = run_logreg(X_6feat, labels, names_6feat, "6Features", train_idx=train_idx, test_idx=test_idx)
 
     # Cleaned features (22 features selection)
     X_clean, names_clean = select_features(X_base_markov, names_bm, CLEANED_FEATURES)
@@ -403,7 +391,6 @@ def main(config_name="llada"):
             "Baseline": res_baseline,
             "Markovian": res_markov,
             "Baseline+Markov": res_bm,
-            "6Features": res_6feat,
             "CleanedFeatures": res_clean,
         },
     }
@@ -419,7 +406,7 @@ def main(config_name="llada"):
     print(f"{'='*70}")
     print(f"  {'Method':<22} {'ROC-AUC':>10} {'PR-AUC':>10} {'Accuracy':>10}")
     print(f"  {'-'*52}")
-    for r in [res_baseline, res_markov, res_bm, res_6feat, res_clean]:
+    for r in [res_baseline, res_markov, res_bm, res_clean]:
         print(f"  {r['name']:<22} {r['test_roc_auc']:>10.4f} {r['test_pr_auc']:>10.4f} {r['test_accuracy']:>10.4f}")
 
     return results

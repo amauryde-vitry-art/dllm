@@ -9,7 +9,7 @@ from GenerateBaseSamplerOutputsAndExtractInfo.GetInfoFromBaseSamplerOutput impor
 import pandas as pd
 import json
 import numpy as np
-from PipelineTest.AnalyseResults import mergeOutputsList
+from PipelineTest.historic_scripts.AnalyseResults import mergeOutputsList
 
 OUTPUTS_PATH  = 'PipelineTest/res/DREAM_64steps_64tokens_maskgit/outputs_DREAM_64steps_64tokens_maskgit.pt'
 EVAL_JSON     = 'PipelineTest/res/eval/results_triviaqa_DREAM_64steps_64tokens_maskgit.json'

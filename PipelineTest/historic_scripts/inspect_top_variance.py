@@ -6,8 +6,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import numpy as np
 import torch
 from transformers import AutoTokenizer
-from PipelineTest.AnalyseResults import mergeOutputsList
-from PipelineTest.CreateMetrics import getFromOutputsVarEntropy, getLabels
+from PipelineTest.historic_scripts.AnalyseResults import mergeOutputsList
+from PipelineTest.historic_scripts.CreateMetrics import getFromOutputsVarEntropy, getLabels
 
 RESULTS_DIR = "PipelineTest/res/results_semantic_dispersion_and_semantic_entropy_3k_stc_2048_samples"
 outputpath = f"{RESULTS_DIR}/outputs_semantic_dispersion_and_semantic_entropy_3k_stc_2048_samples.pt"

@@ -5,7 +5,7 @@ import argparse
 import subprocess
 import tempfile
 import traceback
-
+import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from PipelineTest.scripts.run_evaluation import CONFIGS
@@ -243,6 +243,7 @@ def run_all(config_names, baselines_to_run, include_gpu=False, nproc=2):
 
             print(f"\n  --- Running baseline: {bl['display']} ---")
 
+            bl_t0 = time.time()
             try:
                 if bl["needs_gpu"]:
                     result = _run_gpu_baseline(bl_key, config_name, nproc)
@@ -253,17 +254,32 @@ def run_all(config_names, baselines_to_run, include_gpu=False, nproc=2):
                 print(f"  [ERROR] {bl['display']} failed for {config_name}:")
                 traceback.print_exc()
                 result = None
-
+            bl_t1 = time.time()
+            elapsed = bl_t1 - bl_t0
+            
             metrics = _extract_metrics(result, bl_key)
             if metrics is not None:
+                # Ajoute le timing directement dans le dict de métriques,
+                # que ce soit un dict plat (roc_auc/pr_auc) ou nested
+                # (Baseline_and_markovian_features -> plusieurs sous-résultats)
+                if "roc_auc" in metrics:
+                    metrics["elapsed_seconds"] = round(elapsed, 2)
+                else:
+                    # dict nested : on ajoute le timing global du run
+                    # (partagé par tous les sous-résultats de cette baseline)
+                    metrics["_elapsed_seconds"] = round(elapsed, 2)
+
                 all_results[config_name][bl["display"]] = metrics
                 if isinstance(metrics, dict) and "roc_auc" in metrics:
-                    print(f"  => ROC-AUC: {metrics['roc_auc']:.4f}  PR-AUC: {metrics['pr_auc']:.4f}")
+                    print(f"  => ROC-AUC: {metrics['roc_auc']:.4f}  PR-AUC: {metrics['pr_auc']:.4f}  "
+                          f"({elapsed:.1f}s)")
                 else:
-                    print(f"  => completed (see detailed output)")
+                    print(f"  => completed in {elapsed:.1f}s (see detailed output)")
             else:
-                print(f"  => no result returned")
-
+                # Même sans résultat exploitable, on garde une trace du temps passé
+                all_results[config_name][bl["display"]] = {"elapsed_seconds": round(elapsed, 2), "result": None}
+                print(f"  => no result returned ({elapsed:.1f}s)")
+           
     return all_results
 
 

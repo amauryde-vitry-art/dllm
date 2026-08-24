@@ -23,8 +23,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from GenerateBaseSamplerOutputsAndExtractInfo.GetInfoFromBaseSamplerOutput import getEntropy, getEachStepMask
-from PipelineTest.AnalyseResults import mergeOutputsList
-from PipelineTest.CreateMetrics import getTestSimpleFeatures
+from PipelineTest.historic_scripts.AnalyseResults import mergeOutputsList
+from PipelineTest.historic_scripts.CreateMetrics import getTestSimpleFeatures
 
 # =========================================================================
 # 1. LOAD DATA + INDEX MAPPING
