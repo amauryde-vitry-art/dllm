@@ -77,9 +77,10 @@ CONFIG_CLS_FOR_NAME = {
 DATASETS = ["hotpotqa", "naturalquestion", "triviaqa"]
 SAMPLERS = ["llada", "dream"]
 STEP_TOKEN_COMBOS = [
-    (32, 32),
-    (32, 64),
-    (64, 64),
+    # (32, 32),
+    # (32, 64),
+    # (64, 64),
+    (128, 256)
 ]
 
 # DATASETS = [ "triviaqa"]
