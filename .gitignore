@@ -18,6 +18,7 @@ wheels/
 *.pt
 *.npy
 *.log
+*.tex
 
 # Study directories
 StudyAutoRegressionBehavior/Dream/

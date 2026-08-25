@@ -31,7 +31,7 @@ class DreamSamplerConfig(dllm.pipelines.dream.DreamSamplerConfig):
 
 @dataclass
 class GemmaSamplerConfig(DiffusionGemmaSamplerConfig):
-    max_new_tokens: int = 512
+    max_new_tokens: int = 128
     steps: int = 64
     entropy_bound: float = 0.1
     entropy_threshold: float = 0.005
@@ -39,7 +39,7 @@ class GemmaSamplerConfig(DiffusionGemmaSamplerConfig):
     max_temperature: float = None
     min_temperature: float = None
     return_dict: bool = True
-    canvas_length: int = 64
+    canvas_length: int = 128
 
 
 

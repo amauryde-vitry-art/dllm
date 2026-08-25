@@ -3,12 +3,29 @@ import torch
 from Levenshtein import distance
 
 
+def _pad_slice(e: torch.Tensor, i: int, start_idx: int, length: int, pad_value=0):
+    """Return e[i, start_idx:start_idx+length], right-padding e with pad_value
+    first if it is narrower than start_idx+length.
+
+    Samplers that generate in growing blocks (e.g. DiffusionGemma's canvases)
+    record history tensors whose sequence length grows step over step, so a
+    single histories_* list can mix tensors of different widths. A plain
+    slice would silently return a shorter-than-expected array for the early
+    steps instead of raising, corrupting anything that assumes a fixed
+    max_new_tokens width.
+    """
+    end_idx = start_idx + length
+    row = e[i]
+    if row.shape[-1] < end_idx:
+        row = torch.nn.functional.pad(row, (0, end_idx - row.shape[-1]), value=pad_value)
+    return row[start_idx:end_idx]
+
 
 def getLogProbs(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory) -> list[torch.Tensor]:
     nb_examples = outputs.histories_logprobs[0].shape[0]
     res_logProbs =[]
     for i in range(nb_examples):
-        res_logProbs.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_logprobs])
+        res_logProbs.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().float().cpu().numpy() for e in outputs.histories_logprobs])
     return res_logProbs
 
 
@@ -16,7 +33,7 @@ def getUnmaskLogProbs(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistor
     nb_examples = outputs.histories_unmask_logprobs[0].shape[0]
     res_unmaskLogProbs =[]
     for i in range(nb_examples):
-        res_unmaskLogProbs.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_unmask_logprobs])
+        res_unmaskLogProbs.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().float().cpu().numpy() for e in outputs.histories_unmask_logprobs])
     return res_unmaskLogProbs
 
 
@@ -24,51 +41,51 @@ def getUnmaskLogProbs(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistor
 def getEachStepGeneratedSequence(outputs: dllm.core.samplers.BaseSamplerOutputCompleteHistory, tokenizer) -> list[list[str]]:
     nb_examples = outputs.histories_x[0].shape[0]
     res = []
-    
+    pad_id = getattr(tokenizer, "pad_token_id", None) or 0
+
     for i in range(nb_examples):
         start_idx = outputs.start_idx_history[i]
-        end_idx = start_idx + outputs.max_new_tokens
         example_history_tokens = []
         for e in outputs.histories_x:
-            token_ids = e[i, start_idx:end_idx]
+            token_ids = _pad_slice(e, i, start_idx, outputs.max_new_tokens, pad_value=pad_id)
             tokens = [tokenizer.decode(t) for t in token_ids]
             example_history_tokens.append(tokens)
-            
+
         res.append(example_history_tokens)
-        
+
     return res
 
 def getEachStepProposedSequence(outputs: dllm.core.samplers.BaseSamplerOutputCompleteHistory, tokenizer):
     nb_examples = outputs.histories_x0[0].shape[0]
     res = []
-    
+    pad_id = getattr(tokenizer, "pad_token_id", None) or 0
+
     for i in range(nb_examples):
         start_idx = outputs.start_idx_history[i]
-        end_idx = start_idx + outputs.max_new_tokens
         example_history_tokens = []
         for e in outputs.histories_x0:
-            token_ids = e[i, start_idx:end_idx]
+            token_ids = _pad_slice(e, i, start_idx, outputs.max_new_tokens, pad_value=pad_id)
             tokens = [tokenizer.decode(t) for t in token_ids]
             example_history_tokens.append(tokens)
-            
+
         res.append(example_history_tokens)
-        
+
     return res
 
 def getEachStepProposedTokenIdSequence(outputs: dllm.core.samplers.BaseSamplerOutputCompleteHistory, tokenizer):
     nb_examples = outputs.histories_x0[0].shape[0]
     res = []
-    
+    pad_id = getattr(tokenizer, "pad_token_id", None) or 0
+
     for i in range(nb_examples):
         start_idx = outputs.start_idx_history[i]
-        end_idx = start_idx + outputs.max_new_tokens
         example_history_tokens = []
         for e in outputs.histories_x0:
-            token_ids = e[i, start_idx:end_idx]
+            token_ids = _pad_slice(e, i, start_idx, outputs.max_new_tokens, pad_value=pad_id)
             example_history_tokens.append(token_ids.detach().cpu().numpy())
-            
+
         res.append(example_history_tokens)
-        
+
     return res
 
 
@@ -77,13 +94,24 @@ def getEachStepMask(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory,
     res_masks =[]
     for i in range(nb_examples):
         m = outputs.histories_remasking if remask else outputs.histories_mask
-        res_masks.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in m]) 
+        # pad_value=1: positions not yet generated (beyond a step's recorded
+        # width) are still masked/unresolved, same as a normal masked token.
+        res_masks.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens, pad_value=1).detach().float().cpu().numpy() for e in m])
     return res_masks
 
 
 
 def getEachStepChange(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory):
-    stacked_all = torch.stack(outputs.histories_x0)
+    # Samplers like DiffusionGemma generate in growing blocks ("canvases"), so
+    # tensors in histories_x0 don't all share the same sequence length: later
+    # steps cover more committed tokens than earlier ones. Pad on the right to
+    # the max length before stacking.
+    max_len = max(t.shape[-1] for t in outputs.histories_x0)
+    padded_x0 = [
+        torch.nn.functional.pad(t, (0, max_len - t.shape[-1]))
+        for t in outputs.histories_x0
+    ]
+    stacked_all = torch.stack(padded_x0)
     diff_mask = (stacked_all[1:] != stacked_all[:-1])
     diff_mask = diff_mask.permute(1, 0, 2)
     res_changes = []
@@ -131,7 +159,7 @@ def getH(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory):
     nb_examples = outputs.histories_H[0].shape[0]
     res_H =[]
     for i in range(nb_examples):
-        res_H.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_H]) 
+        res_H.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().float().cpu().numpy() for e in outputs.histories_H])
     return res_H
 
 
@@ -148,7 +176,7 @@ def getEntropy(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory):
     nb_examples = outputs.histories_entropy[0].shape[0]
     res_entropy =[]
     for i in range(nb_examples):
-        res_entropy.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_entropy]) 
+        res_entropy.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().float().cpu().numpy() for e in outputs.histories_entropy])
     return res_entropy
 
 
@@ -156,7 +184,7 @@ def getSemanticDispersion(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHi
     nb_examples = outputs.histories_semantic_dispersion[0].shape[0]
     res = []
     for i in range(nb_examples):
-        res.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_semantic_dispersion])
+        res.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().float().cpu().numpy() for e in outputs.histories_semantic_dispersion])
     return res
 
 
@@ -164,21 +192,21 @@ def getSemanticEntropy(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHisto
     nb_examples = outputs.histories_semantic_entropy[0].shape[0]
     res = []
     for i in range(nb_examples):
-        res.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_semantic_entropy])
+        res.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().float().cpu().numpy() for e in outputs.histories_semantic_entropy])
     return res
 
 def getSemanticLogprobs(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory):
     nb_examples = outputs.histories_semantic_logprobs[0].shape[0]
     res = []
     for i in range(nb_examples):
-        res.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_semantic_logprobs])
+        res.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().float().cpu().numpy() for e in outputs.histories_semantic_logprobs])
     return res
 
 def getSemanticBestLogprobsLabel(outputs:dllm.core.samplers.BaseSamplerOutputCompleteHistory):
     nb_examples = outputs.histories_semantic_bestlogprobs_label[0].shape[0]
     res = []
     for i in range(nb_examples):
-        res.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().cpu().numpy() for e in outputs.histories_semantic_bestlogprobs_label])
+        res.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().cpu().numpy() for e in outputs.histories_semantic_bestlogprobs_label])
     return res
 
 
@@ -187,9 +215,9 @@ def getEntropyJustUnmasked(outputs: dllm.core.samplers.BaseSamplerOutputComplete
     res_entropy = []
     res_masks = []
     for i in range(nb_examples):
-        res_entropy.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_entropy]) 
-        res_masks.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_mask])
-        
+        res_entropy.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().float().cpu().numpy() for e in outputs.histories_entropy])
+        res_masks.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens, pad_value=1).detach().float().cpu().numpy() for e in outputs.histories_mask])
+
     entropy_at_unmask_time_list = []
     for i in range(nb_examples):
         masked = np.asarray(res_masks[i], dtype=bool)
@@ -219,9 +247,9 @@ def getLogProbsJustUnmasked(outputs):
     res_logprobs = []
     res_masks = []
     for i in range(nb_examples):
-        res_logprobs.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_logprobs]) 
-        res_masks.append([e[i, outputs.start_idx_history[i]:outputs.start_idx_history[i]+outputs.max_new_tokens].detach().float().cpu().numpy() for e in outputs.histories_mask])
-        
+        res_logprobs.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens).detach().float().cpu().numpy() for e in outputs.histories_logprobs])
+        res_masks.append([_pad_slice(e, i, outputs.start_idx_history[i], outputs.max_new_tokens, pad_value=1).detach().float().cpu().numpy() for e in outputs.histories_mask])
+
     logprobs_at_unmask_time_list = []
     for i in range(nb_examples):
         masked = np.asarray(res_masks[i], dtype=bool)
