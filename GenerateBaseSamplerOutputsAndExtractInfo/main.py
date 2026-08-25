@@ -31,15 +31,15 @@ class DreamSamplerConfig(dllm.pipelines.dream.DreamSamplerConfig):
 
 @dataclass
 class GemmaSamplerConfig(DiffusionGemmaSamplerConfig):
-    max_new_tokens: int = 128
-    steps: int = 64
+    max_new_tokens: int = 32
+    steps: int = 16
     entropy_bound: float = 0.1
     entropy_threshold: float = 0.005
     stability_threshold: int = 1
     max_temperature: float = None
     min_temperature: float = None
     return_dict: bool = True
-    canvas_length: int = 128
+    canvas_length: int = 32
 
 
 
@@ -52,7 +52,7 @@ messages = [
     # [{"role": "user", "content": "Which city is the capital of Australia?"}],
     
     # 3. HISTOIRE : Test de créativité et de cohérence narrative (longue traîne)
-    [{"role": "user", "content": "Write a short story about an astronaut"}]
+    [{"role": "user", "content": "Which theory states that 'people tend to rise to their own level of incompetence'? Please answer briefly and concisely."}],
 ]
 
 

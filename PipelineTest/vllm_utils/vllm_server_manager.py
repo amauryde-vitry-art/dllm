@@ -17,7 +17,6 @@ import torch.distributed as dist
 import dllm
 from dataclasses import dataclass
 from load_data import load_triviaqa, load_naturalquestion, load_hotpotqa
-from dllm.pipelines.diffusiongemma.sampler import DiffusionGemmaSamplerWithCompleteHistory, DiffusionGemmaSamplerConfig
 
 
 DATASET_LOADERS = {
@@ -46,15 +45,6 @@ class DreamSamplerConfig(dllm.pipelines.dream.DreamSamplerConfig):
     temperature: float = 0.0
 
 @dataclass
-class GemmaSamplerConfig(DiffusionGemmaSamplerConfig):
-    max_new_tokens: int = 64
-    steps: int = 64
-    max_temperature: float = None
-    min_temperature: float = None
-    return_dict: bool = True
-    canvas_length: int = 64
-
-@dataclass
 class ScriptArguments:
     model_name_or_path: str = "GSAI-ML/LLaDA-8B-Instruct"
     seed: int = 42
@@ -69,7 +59,6 @@ class ScriptArguments:
 MODEL_FOR_SAMPLER = {
     "llada": "GSAI-ML/LLaDA-8B-Instruct",
     "dream": "Dream-org/Dream-v0-Instruct-7B",
-    "diffgemma": "google/diffusiongemma-26B-A4B-it",
 }
 
 
@@ -109,7 +98,6 @@ def _run_batches_for_group(
     batch_size,
     rank,
     temp_label,
-    sampler_name="llada",
 ):
     """
     Runs sampling over a subset of the (already-sharded) dataset using a
@@ -146,27 +134,11 @@ def _run_batches_for_group(
             flush=True,
         )
 
-        if sampler_name == "diffgemma":
-            # Le tokenizer diffgemma (issu de l'AutoProcessor) ne renvoie pas des
-            # ids avec apply_chat_template(..., tokenize=True) en mode batch --
-            # on formate en texte puis on tokenize nous-mêmes par échantillon,
-            # comme dans sample_answers_without_collapse.py et dllm/pipelines/diffusiongemma/eval.py.
-            formatted_prompts = [
-                tokenizer.apply_chat_template(
-                    msg, add_generation_prompt=True, tokenize=False,
-                )
-                for msg in batch_messages
-            ]
-            inputs = [
-                tokenizer.encode(p, return_tensors="pt").squeeze(0)
-                for p in formatted_prompts
-            ]
-        else:
-            inputs = tokenizer.apply_chat_template(
-                batch_messages,
-                add_generation_prompt=True,
-                tokenize=True,
-            )
+        inputs = tokenizer.apply_chat_template(
+            batch_messages,
+            add_generation_prompt=True,
+            tokenize=True,
+        )
 
         outputs = sampler_obj.sample(inputs, sampler_config, return_dict=True)
         # sample_indices are set by the caller once shard-local -> global
@@ -227,38 +199,10 @@ def SampleAnswers(
 
         print(f"[rank {rank}] Loading model/tokenizer: {script_args.model_name_or_path}", flush=True)
         device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() else "cpu")
-
-        if sampler_name == "diffgemma":
-            # DiffusionGemma (26B-A4B) ne tient pas sur un seul GPU : on répartit
-            # manuellement l'encodeur/décodeur sur les GPU 0 et 1, comme dans
-            # sample_answers_without_collapse.py.
-            from transformers import AutoProcessor, DiffusionGemmaForBlockDiffusion
-            model_path = MODEL_FOR_SAMPLER["diffgemma"]
-            processor = AutoProcessor.from_pretrained(model_path)
-            gemma_device_map = {
-                "model.encoder.language_model.embed_tokens": 0,
-                "model.decoder.embed_tokens": 0,
-                "model.encoder.vision_tower": 0,
-                "model.encoder.embed_vision": 0,
-                "model.decoder.self_conditioning": 0,
-                "lm_head": 0,
-                "model.encoder.language_model.norm": 1,
-                "model.decoder.norm": 1,
-            }
-            for i in range(30):
-                gpu = 0 if i < 15 else 1
-                gemma_device_map[f"model.encoder.language_model.layers.{i}"] = gpu
-                gemma_device_map[f"model.decoder.layers.{i}"] = gpu
-            model = DiffusionGemmaForBlockDiffusion.from_pretrained(
-                model_path, torch_dtype=torch.bfloat16, device_map=gemma_device_map,
-            ).eval()
-            tokenizer = processor.tokenizer
-        else:
-            model = dllm.utils.get_model(
-                model_name_or_path=script_args.model_name_or_path,
-            ).to(device).eval()
-            tokenizer = dllm.utils.get_tokenizer(model_name_or_path=script_args.model_name_or_path)
-
+        model = dllm.utils.get_model(
+            model_name_or_path=script_args.model_name_or_path,
+        ).to(device).eval()
+        tokenizer = dllm.utils.get_tokenizer(model_name_or_path=script_args.model_name_or_path)
         sampler_obj = sampler(model=model, tokenizer=tokenizer)
 
         # Build two configs sharing all fields except temperature.
@@ -306,7 +250,6 @@ def SampleAnswers(
             batch_size=batch_size,
             rank=rank,
             temp_label=temp,
-            sampler_name=sampler_name,
         )
 
         # Remap shard-local indices -> global dataset indices for both results
@@ -482,12 +425,10 @@ def parse_args():
                         help="Dataset to sample from (default: triviaqa)")
     parser.add_argument("--num_sample", type=int, default=2100, help="Number of samples")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
-    parser.add_argument("--sampler", type=str, choices=["llada", "dream", "diffgemma"], default="llada",
+    parser.add_argument("--sampler", type=str, choices=["llada", "dream"], default="llada",
                         help="Sampler to use (default: llada)")
     parser.add_argument("--steps", type=int, default=16, help="Number of diffusion steps")
     parser.add_argument("--max_new_tokens", type=int, default=32, help="Max new tokens to generate")
-    parser.add_argument("--canvas_length", type=int, default=None,
-                        help="Canvas length for diffgemma sampler (default: same as --max_new_tokens)")
     parser.add_argument("--temp", type=float, default=0.0,
                         help=" temperature value, used to harvest factual-leaning samples (default: 0.0)")
     
@@ -503,9 +444,6 @@ if __name__ == "__main__":
     if args.sampler == "llada":
         sampler_cls = dllm.core.samplers.MDLMSamplerWithCompleteHistory
         config_cls = SamplerConfig
-    elif args.sampler == "diffgemma":
-        sampler_cls = DiffusionGemmaSamplerWithCompleteHistory
-        config_cls = GemmaSamplerConfig
     else:
         sampler_cls = dllm.pipelines.dream.sampler.DreamSamplerWithCompleteHistory
         config_cls = DreamSamplerConfig
@@ -516,13 +454,10 @@ if __name__ == "__main__":
         "steps": args.steps,
         "max_new_tokens": args.max_new_tokens,
     }
-
+    
     if args.sampler == "llada":
         overrides["__annotations__"]["block_size"] = int
         overrides["block_size"] = args.max_new_tokens
-    elif args.sampler == "diffgemma":
-        overrides["__annotations__"]["canvas_length"] = int
-        overrides["canvas_length"] = args.canvas_length if args.canvas_length is not None else args.max_new_tokens
     config_cls = dataclass(type(f"CLI_{config_cls.__name__}", (config_cls,), overrides))
 
     suffix = (

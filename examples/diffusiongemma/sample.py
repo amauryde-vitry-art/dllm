@@ -98,8 +98,7 @@ if script_args.prompt_file is not None:
     )
 if not prompts:
     prompts = [
-        "Give a concise explanation of text diffusion models.",
-        "Write one short haiku about compilers.",
+        "Write a short story about an astronaut.",
     ]
 
 messages = [[{"role": "user", "content": prompt}] for prompt in prompts]

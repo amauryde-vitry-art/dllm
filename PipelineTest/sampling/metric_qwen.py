@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import torch.nn.functional as F
@@ -5,13 +7,24 @@ import json
 import os
 import re
 from tqdm import tqdm
+import time
+import OpenAI
+
+
 
 def load_qwen(device=None):
-    tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen3.5-9B', trust_remote_code=True, )
+    tokenizer = AutoTokenizer.from_pretrained('Qwen/Qwen3.5-9B', trust_remote_code=True)
+    
+    tokenizer.padding_side = "left" 
+    
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id
+
     if device is None:
         device_map = "auto"
     else:
         device_map = {"": device}
+        
     model = AutoModelForCausalLM.from_pretrained(
         'Qwen/Qwen3.5-9B',
         device_map=device_map,
@@ -20,14 +33,32 @@ def load_qwen(device=None):
     ).eval()
     return tokenizer, model
 
+from jinja2 import Template
+
+
 def get_prompt(sample):
-    messages = [
-        {'role': 'system', 'content': 'You are a helpful assistant.'},
-        {'role': 'user', 'content': ''}
-    ]
+  # 1. Extraction et nettoyage des données de sample
+  query = sample.get("question", "").strip()
+  generated_answer = sample.get("answer", "").strip()
 
+  # Sépare le premier label (expected_answer) et les suivants (answer_aliases)
+  labels = sample.get("label", [])
+  flat_labels = []
 
-    TRUE_FALSE_PROMPT = """
+  if isinstance(labels, str):
+    flat_labels = [labels.strip()]
+  elif isinstance(labels, list):
+    for entry in labels:
+      if isinstance(entry, str):
+        flat_labels.append(entry.strip())
+      elif isinstance(entry, list) and len(entry) > 0:
+        flat_labels.append(str(entry[0]).strip())
+
+  expected_answer = flat_labels[0] if flat_labels else ""
+  answer_aliases = flat_labels[1:] if len(flat_labels) > 1 else []
+
+  # 2. Votre template TRUE_FALSE_PROMPT exact (syntaxe Jinja2)
+  TRUE_FALSE_PROMPT = """
 You are an expert evaluator tasked with determining if two answers convey compatible information. Your task is to make a binary True/False judgment on whether the answers are SEMANTICALLY COMPATIBLE.
 
 Query:
@@ -84,30 +115,45 @@ Your response MUST follow this format:
   "explanation": "One clear sentence explaining why the answers are compatible or contradictory."
 }
 """
-    messages[-1]['content'] = TRUE_FALSE_PROMPT
-    messages.append({'role': 'assistant',
-                     'content': 'I understand. Please provide the question and the bot\'s answer.'})
-    messages.append({'role': 'user', 'content': ''})
+
+  # 3. Rendu Jinja2 : Injecte les vraies variables dans le prompt
+  rendered_prompt = Template(TRUE_FALSE_PROMPT).render(
+      query=query,
+      expected_answer=expected_answer,
+      answer_aliases=answer_aliases,
+      generated_answer=generated_answer,
+  )
+
+  # 4. Construction des messages pour le chat template
+  messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a strict evaluator. Do NOT generate any reasoning, thinking process, or preamble. "
+                "Respond ONLY with a JSON object."
+            ),
+        },
+        {"role": "user", "content": rendered_prompt},
+    ]
+
+  return messages
 
 
-    user_input_for_judging = f"Question:{sample['question'].strip()}\n\nThe correct answer example is as follow:\n"
-    if isinstance(sample['label'], str):
-        user_input_for_judging += f"{sample['label'].strip()}\n"
-    else:
-        for example_answer in sample['label']:
-            if isinstance(example_answer, str):
-                user_input_for_judging += f"{example_answer.strip()}\n"
-            elif isinstance(example_answer, list):
-                user_input_for_judging += ', '.join([example_answer[0].strip()]) + '\n'
+import gc
+import json
+import os
+import re
+import time
+import torch
 
-    user_input_for_judging += f"\nThe bot replied as follow:\n{sample['answer'].strip()}\n\nNow please judge whether the bot's answer is hallucinated or not. If it is hallucinated, please answer \"yes\", otherwise answer \"no\". Dont show thinking and put your answer in <answer> </answer>.\n"
-    messages[-1]['content'] = user_input_for_judging
-    return messages
-
-
-def compute_correctness_truthfulqa(answer_path, model, tokenizer, batch_size=16):
-    import time
-
+def compute_correctness_truthfulqa(
+    answer_path,
+    client: OpenAI,
+    model_name: str,
+    max_concurrent_requests: int = 16,
+    max_new_tokens: int = 128,
+    max_retries: int = 3,
+):
     with open(answer_path, "r", encoding="utf-8") as f:
         raw = f.read().strip()
     if not raw:
@@ -118,113 +164,91 @@ def compute_correctness_truthfulqa(answer_path, model, tokenizer, batch_size=16)
         raise ValueError(f"Invalid JSON in {answer_path}: {e}") from e
 
     total = len(results)
-    print(f"[eval] Starting evaluation of {total} samples (batch_size={batch_size})", flush=True)
+    print(
+        f"[eval] Starting evaluation of {total} samples "
+        f"(max_concurrent_requests={max_concurrent_requests})",
+        flush=True,
+    )
     t0 = time.time()
-
-    # Prepare all prompts upfront
-    prompts = []
-    for sample in results:
-        messages = get_prompt(sample)
-        prompt = tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-        prompts.append(prompt)
-
-    # Ensure left-padding for batched generation
-    original_padding_side = tokenizer.padding_side
-    tokenizer.padding_side = "left"
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token_id = tokenizer.eos_token_id
 
     correctness = [0] * total
 
-    for batch_start in range(0, total, batch_size):
-        batch_end = min(batch_start + batch_size, total)
-        batch_prompts = prompts[batch_start:batch_end]
+    def _judge_one(idx):
+        sample = results[idx]
+        messages = get_prompt(sample)
 
-        inputs = tokenizer(
-            batch_prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-        ).to(model.device)
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=messages,
+                    temperature=0.0,
+                    max_tokens=max_new_tokens,
+                    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
 
-        with torch.no_grad():
-            output_ids = model.generate(
-                **inputs,
-                do_sample=False,
-                max_new_tokens=64,
-            )
+                )
+                decoded_str = response.choices[0].message.content.strip()
+                return idx, decoded_str, None
+            except Exception as e:
+                last_err = e
+                time.sleep(1.5 * (attempt + 1))  # backoff simple
+        return idx, "", last_err
 
-        # Decode only the generated part (after input)
-        input_len = inputs["input_ids"].shape[1]
-        for i, idx in enumerate(range(batch_start, batch_end)):
-            generated_tokens = output_ids[i][input_len:]
-            output_text = extract_answer(
-                tokenizer.decode(generated_tokens, skip_special_tokens=True).strip().lower()
-            )
+    done = 0
+    with ThreadPoolExecutor(max_workers=max_concurrent_requests) as executor:
+        futures = [executor.submit(_judge_one, idx) for idx in range(total)]
 
-            if output_text == "no":
-                results[idx]['is_hallucination'] = "no"
-            elif output_text == "yes":
-                results[idx]['is_hallucination'] = "yes"
+        from concurrent.futures import as_completed
+
+        for future in as_completed(futures):
+            idx, decoded_str, err = future.result()
+
+            if err is not None:
+                # Requête définitivement échouée après retries -> traité comme "unclear"
+                print(f"[eval] WARNING sample {idx} failed after retries: {err}", flush=True)
+                results[idx]["is_hallucination"] = "unclear"
+                results[idx]["explanation"] = f"eval_error: {err}"
+                correctness[idx] = 0
             else:
-                results[idx]['is_hallucination'] = "unclear"
+                output_dict = extract_answer(decoded_str)
+                judgment = output_dict.get("judgment", "unclear")
+                explanation = output_dict.get("explanation", "")
 
-            if "yes" in output_text:
-                correctness[idx] = 0  # hallucinated
-            elif "no" in output_text:
-                correctness[idx] = 1  # not hallucinated
-            else:
-                correctness[idx] = 0  # treat unclear answers as hallucinated
+                if judgment == "false":
+                    results[idx]["is_hallucination"] = "yes"
+                    results[idx]["explanation"] = explanation
+                    correctness[idx] = 0
+                elif judgment == "true":
+                    results[idx]["is_hallucination"] = "no"
+                    results[idx]["explanation"] = explanation
+                    correctness[idx] = 1
+                else:
+                    results[idx]["is_hallucination"] = "unclear"
+                    results[idx]["explanation"] = explanation
+                    correctness[idx] = 0
 
-        # Progress log every batch
-        elapsed = time.time() - t0
-        done = batch_end
-        speed = done / elapsed if elapsed > 0 else 0
-        eta = (total - done) / speed if speed > 0 else 0
-        acc_so_far = sum(correctness[:done]) / done if done > 0 else 0
-        print(
-            f"[eval] {done}/{total} ({done*100//total}%) | "
-            f"acc={acc_so_far:.2%} | {elapsed:.1f}s elapsed | ETA {eta:.0f}s",
-            flush=True,
-        )
+            done += 1
+            if done % max_concurrent_requests == 0 or done == total:
+                elapsed = time.time() - t0
+                speed = done / elapsed if elapsed > 0 else 0
+                eta = (total - done) / speed if speed > 0 else 0
+                acc_so_far = sum(correctness[:done]) / done if done > 0 else 0
+                print(
+                    f"[eval] {done}/{total} ({done*100//total}%) | "
+                    f"acc~={acc_so_far:.2%} | {elapsed:.1f}s elapsed | ETA {eta:.0f}s",
+                    flush=True,
+                )
 
-    # Restore padding side
-    tokenizer.padding_side = original_padding_side
+    print(
+        f"[eval] Done. Final accuracy: {sum(correctness)/total:.2%} in"
+        f" {time.time()-t0:.1f}s",
+        flush=True,
+    )
 
-    print(f"[eval] Done. Final accuracy: {sum(correctness)/total:.2%} in {time.time()-t0:.1f}s", flush=True)
-
-    eval_dir = os.path.abspath(os.path.join(os.path.dirname(answer_path), "..", "eval"))
-    os.makedirs(eval_dir, exist_ok=True)  
-
-    eval_filename = os.path.basename(answer_path)
-    eval_path = os.path.join(eval_dir, eval_filename)
-
-    with open(eval_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-
-    return correctness
-
-def compute_correctness_sciqa(answer_path):
-    with open(answer_path, "r") as f:
-        results = json.load(f)
-
-    correctness = []
-    for index, sample in enumerate(results):
-        label_list = sample['label']
-        answer = sample['answer']
-
-        num_label = str(label_list[0])
-
-        if num_label in answer or label_list[1].lower() in answer.lower():
-            sample['is_hallucination'] = "no"
-            correctness.append(1)
-        else:
-            sample['is_hallucination'] = "yes"
-            correctness.append(0)
-
-        results[index] = sample
-
-    eval_dir = os.path.abspath(os.path.join(os.path.dirname(answer_path), "..", "eval"))
+    eval_dir = os.path.abspath(
+        os.path.join(os.path.dirname(answer_path), "..", "eval")
+    )
     os.makedirs(eval_dir, exist_ok=True)
 
     eval_filename = os.path.basename(answer_path)
@@ -232,14 +256,71 @@ def compute_correctness_sciqa(answer_path):
 
     with open(eval_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
+
     return correctness
 
-def extract_answer(text):
-    match = re.search(r"<answer>(.*?)</answer>", text, flags=re.DOTALL | re.IGNORECASE)
-    if match:
-        return match.group(1).strip()
-    else:
-        return text
+
+
+
+
+def save_eval_file(answer_path, results):
+    eval_dir = os.path.abspath(os.path.join(os.path.dirname(answer_path), "..", "eval"))
+    os.makedirs(eval_dir, exist_ok=True)
+    with open(os.path.join(eval_dir, os.path.basename(answer_path)), "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+
+import json
+import re
+
+def extract_answer(text: str) -> dict:
+  """Extrait le jugement et l'explication depuis le texte de l'évaluateur.
+
+  Si un JSON valide est trouvé, ses champs sont renvoyés.
+  Sinon, tout le texte généré est placé dans 'explanation' avec un jugement
+  'unclear'.
+  """
+  if not text or not isinstance(text, str):
+    return {
+        "judgment": "unclear",
+        "explanation": "Empty or invalid input text",
+    }
+
+  # Recherche du premier bloc JSON { ... } dans le texte
+  json_match = re.search(r"\{.*\}", text, re.DOTALL)
+  if json_match:
+    try:
+      response_dict = json.loads(json_match.group(0))
+
+      if isinstance(response_dict, dict) and "judgment" in response_dict:
+        raw_judgment = response_dict["judgment"]
+
+        # Normalisation de judgment (booléen ou string -> "true" / "false")
+        if isinstance(raw_judgment, bool):
+          judgment_str = "true" if raw_judgment else "false"
+        elif isinstance(raw_judgment, str):
+          judgment_str = raw_judgment.strip().lower()
+          if judgment_str not in ["true", "false"]:
+            judgment_str = "unclear"
+        else:
+          judgment_str = "unclear"
+
+        return {
+            "judgment": judgment_str,
+            "explanation": response_dict.get(
+                "explanation", "No explanation provided"
+            ),
+        }
+    except json.JSONDecodeError:
+      pass
+
+  # Pas de JSON valide trouvé : renvoie tout le texte généré
+  return {"judgment": "unclear", "explanation": text.strip()}
+
+# =========================================================================
+# MAIN
+# =========================================================================
+
+
 
 if __name__ == "__main__":
     tokenizer, model = load_qwen()
@@ -255,13 +336,10 @@ if __name__ == "__main__":
         output_file = filename.replace(".json", "_correctness.pt")
         output_path = os.path.join(output_dir, output_file)
 
-        print(f"Evaluating {filename}...")
+        print(f"\nEvaluating {filename}...")
 
-        if "sciqa" in filename or "commonsenseqa" in filename:
-            correctness = compute_correctness_sciqa(answer_path)
-        else:
-            correctness = compute_correctness_truthfulqa(answer_path, model, tokenizer)
+        correctness = compute_correctness_truthfulqa(answer_path, model, tokenizer)
 
         correctness = torch.tensor(correctness)
         torch.save(correctness, output_path)
-        print(f"  -> Accuracy: {correctness.float().mean().item():.2%} | Saved to {output_path}")
+        print(f"  -> Final Accuracy: {correctness.float().mean().item():.2%} | Saved to {output_path}")
