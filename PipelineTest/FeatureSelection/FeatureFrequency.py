@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 from PipelineTest.FeatureSelection.evaluate import benchmark_evaluate
 from PipelineTest.FeatureSelection.configs import extract_features_and_labels, CONFIGS
 
-top_n = 31
+top_n = 15
 
 PATH_RESULTS = "PipelineTest/res/FeatureSelection/results"
 SAVE_DIR = f"PipelineTest/res/FeatureSelection/results_top{top_n}"

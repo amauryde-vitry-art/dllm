@@ -190,6 +190,10 @@ if rank == 0 and result is not None:
         # Cela oblige le processus enfant à cracher ses logs immédiatement dans le pipe
         env_unbuffered = os.environ.copy()
         env_unbuffered["PYTHONUNBUFFERED"] = "1"
+        # Reduit la fragmentation de l'allocateur CUDA (cf. torch.OutOfMemoryError
+        # observe malgre de la VRAM "libre" mais reservee/fragmentee par les gros
+        # tenseurs temporaires du sampler MDLM).
+        env_unbuffered.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
         # Utilisation de Popen pour lire le flux en temps réel
         proc = subprocess.Popen(

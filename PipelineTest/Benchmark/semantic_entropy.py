@@ -8,6 +8,16 @@ import torch.distributed as dist
 import transformers
 from dataclasses import dataclass
 import time
+
+
+def _gpu_mem_str(local_rank):
+    """Résumé mémoire GPU courant (alloué/réservé/total) pour vérifier la charge réelle."""
+    if not torch.cuda.is_available() or local_rank < 0:
+        return "cpu"
+    alloc = torch.cuda.memory_allocated(local_rank) / 1024**3
+    reserved = torch.cuda.memory_reserved(local_rank) / 1024**3
+    total = torch.cuda.get_device_properties(local_rank).total_memory / 1024**3
+    return f"{alloc:.1f}GiB alloc / {reserved:.1f}GiB reserved / {total:.1f}GiB total"
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 import dllm
 from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score
@@ -107,6 +117,10 @@ def load_generation_backend(model_type: str, local_rank: int, rank: int):
     ).eval()
     tokenizer = dllm.utils.get_tokenizer(model_name_or_path=resolved_path)
     sampler = entry["sampler_cls"](model=model, tokenizer=tokenizer)
+    if torch.cuda.is_available():
+        dev_name = torch.cuda.get_device_name(local_rank)
+        print(f"[rank {rank}] Generation model ({model_type}) resident on cuda:{local_rank} "
+              f"({dev_name}) | {_gpu_mem_str(local_rank)}", flush=True)
     return model, tokenizer, sampler, entry["make_sampler_config"]
 
 
@@ -147,6 +161,8 @@ def _build_nli_pipeline(local_rank):
         truncation=True,
         max_length=256,
     )
+    print(f"[rank {local_rank}] NLI pipeline (DeBERTa) resident on {device_str} | {_gpu_mem_str(local_rank)}",
+          flush=True)
     return pipeline_nli
 
 
@@ -157,7 +173,8 @@ def _build_nli_pipeline(local_rank):
 # tant qu'on n'est pas memory-bound => on amortit `steps` sur un batch plus
 # large plutôt que de le repayer N fois).
 # =========================================================================
-def generate_variants(tokenizer, sampler, sampler_config, messages: list, N: int, gen_batch_size: int = 32):
+def generate_variants(tokenizer, sampler, sampler_config, messages: list, N: int, gen_batch_size: int = 16,
+                       rank: int = 0, log_every: int = 10):
     """Génère N variantes stochastiques pour chaque message."""
     results = {msg[0]['content']: [] for msg in messages}
 
@@ -168,8 +185,13 @@ def generate_variants(tokenizer, sampler, sampler_config, messages: list, N: int
             expanded_messages.append(msg)
             expanded_keys.append(msg[0]['content'])
 
+    n_batches = (len(expanded_messages) + gen_batch_size - 1) // max(gen_batch_size, 1)
+    t_start = time.time()
+    print(f"[rank {rank}] generate_variants: {len(expanded_messages)} items "
+          f"({len(messages)} prompts x N={N}) in {n_batches} batches of {gen_batch_size}", flush=True)
+
     with torch.inference_mode():
-        for start_idx in range(0, len(expanded_messages), gen_batch_size):
+        for batch_idx, start_idx in enumerate(range(0, len(expanded_messages), gen_batch_size)):
             end_idx = min(start_idx + gen_batch_size, len(expanded_messages))
             batch_messages = expanded_messages[start_idx:end_idx]
             batch_keys = expanded_keys[start_idx:end_idx]
@@ -181,6 +203,26 @@ def generate_variants(tokenizer, sampler, sampler_config, messages: list, N: int
             for key, seq in zip(batch_keys, flat_sequences):
                 results[key].append(seq)
 
+            # Le sampler MDLM passe les logits en float64 pour le bruit de Gumbel
+            # (cf. dllm/core/samplers/utils.py::add_gumbel_noise) : sur un vocab
+            # ~126k, chaque batch alloue plusieurs tenseurs temporaires de plusieurs
+            # GiB. Libérer le cache de l'allocateur après chaque batch évite que la
+            # fragmentation ne s'accumule sur les ~150+ batches d'une config et ne
+            # finisse par déclencher un OOM même quand la VRAM "logique" est dispo.
+            del outputs, flat_sequences
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            if (batch_idx + 1) % log_every == 0 or (batch_idx + 1) == n_batches:
+                elapsed = time.time() - t_start
+                rate = (batch_idx + 1) / elapsed if elapsed > 0 else 0.0
+                eta = (n_batches - batch_idx - 1) / rate if rate > 0 else float("inf")
+                print(f"  [rank {rank}] gen batch {batch_idx + 1}/{n_batches} "
+                      f"({elapsed:.1f}s elapsed, {rate:.2f} batch/s, ETA {eta:.0f}s) | "
+                      f"{_gpu_mem_str(sampler.model.device.index if torch.cuda.is_available() else -1)}",
+                      flush=True)
+
+    print(f"[rank {rank}] generate_variants done in {time.time() - t_start:.1f}s", flush=True)
     return results
 
 
@@ -282,7 +324,7 @@ def calculate_semantic_entropy_nli(dict_results, pipeline_nli, nli_batch_size=64
 # =========================================================================
 def generate_and_evaluate_nli_parallel(tokenizer, sampler, sampler_config, nli_pipeline,
                                         messages: list, N: int, rank: int, world_size: int,
-                                        local_rank: int, seed: int = 42, gen_batch_size: int = 32,
+                                        local_rank: int, seed: int = 42, gen_batch_size: int = 8,
                                         nli_batch_size: int = 64):
     """Génère N variantes stochastiques ET calcule l'entropie sémantique par NLI."""
 
@@ -291,14 +333,20 @@ def generate_and_evaluate_nli_parallel(tokenizer, sampler, sampler_config, nli_p
 
     shard_indices = list(range(rank, len(messages), world_size))
     shard_messages = [messages[i] for i in shard_indices]
-    print(f"[rank {rank}/{world_size}] Assigned {len(shard_messages)} prompts for Gen + NLI", flush=True)
+    t_shard_start = time.time()
+    print(f"[rank {rank}/{world_size}] Assigned {len(shard_messages)} prompts for Gen + NLI "
+          f"(t={t_shard_start:.0f})", flush=True)
 
     # 1. Génération des variantes (batchée sur prompts x variantes)
     shard_results = generate_variants(tokenizer, sampler, sampler_config, shard_messages, N,
-                                       gen_batch_size=gen_batch_size)
+                                       gen_batch_size=gen_batch_size, rank=rank)
+    print(f"[rank {rank}] Gen phase done at t={time.time():.0f} "
+          f"(+{time.time() - t_shard_start:.1f}s since shard start)", flush=True)
 
     # 2. Calcul de l'entropie sémantique en local sur le shard
     shard_detailed = calculate_semantic_entropy_nli(shard_results, nli_pipeline, nli_batch_size=nli_batch_size, rank=rank)
+    print(f"[rank {rank}] NLI phase done at t={time.time():.0f} "
+          f"(+{time.time() - t_shard_start:.1f}s since shard start)", flush=True)
 
     # 3. Fusion inter-GPU par communication collective NCCL (plus d'aller-retour
     #    disque via /tmp, qui était refait à chaque config).
@@ -351,7 +399,7 @@ def evaluate(scores, labels, name="SemanticEntropy"):
 # =========================================================================
 def run_config(config_name, tokenizer, sampler, make_sampler_config, nli_pipeline,
                 rank, world_size, local_rank,
-                n_variants=10, balance_seed=42, gen_batch_size=32, nli_batch_size=64):
+                n_variants=10, balance_seed=42, gen_batch_size=8, nli_batch_size=64):
     cfg = CONFIGS[config_name]
     eval_json = cfg["eval_json"]
 
@@ -441,9 +489,11 @@ def parse_args():
     parser.add_argument("--n_variants", type=int, default=5)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--balance_seed", type=int, default=42)
-    parser.add_argument("--gen_batch_size", type=int, default=32,
+    parser.add_argument("--gen_batch_size", type=int, default=16,
                          help="Taille totale de batch pour la génération (prompts x variantes confondus). "
-                              "A augmenter tant que la VRAM le permet.")
+                              "Le sampler MDLM passe les logits en float64 pour le bruit de Gumbel : sur un "
+                              "vocab ~126k, chaque unité de batch coûte plusieurs centaines de Mo de tenseurs "
+                              "temporaires. A augmenter prudemment tant que la VRAM le permet.")
     parser.add_argument("--nli_batch_size", type=int, default=64,
                          help="Taille de batch pour DeBERTa NLI.")
     return parser.parse_args()
