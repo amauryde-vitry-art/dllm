@@ -165,6 +165,9 @@ def run_experiment_DiffusionGemma(model_cfg, messages, SamplerConfigClass=None):
             gpu = 0 if i < 15 else 1
             device_map[f"model.encoder.language_model.layers.{i}"] = gpu
             device_map[f"model.decoder.layers.{i}"] = gpu
+            
+        device_map["model.encoder.language_model.norm"] = 1
+        device_map["model.decoder.norm"] = 1
 
     model = DiffusionGemmaForBlockDiffusion.from_pretrained(
         model_path, torch_dtype=torch_dtype, device_map=device_map,

@@ -32,7 +32,7 @@ class DreamSamplerConfig(dllm.pipelines.dream.DreamSamplerConfig):
 @dataclass
 class GemmaSamplerConfig(DiffusionGemmaSamplerConfig):
     max_new_tokens: int = 512
-    steps: int = 512
+    steps: int = 64
     entropy_bound: float = 0.1
     entropy_threshold: float = 0.005
     stability_threshold: int = 1
@@ -45,11 +45,11 @@ class GemmaSamplerConfig(DiffusionGemmaSamplerConfig):
 
 
 messages = [
-    # 1. CODE : Test de la logique et de la syntaxe
-    [{"role": "user", "content": "Write a Python script for Fibonacci sequence."}],
+    # # 1. CODE : Test de la logique et de la syntaxe
+    # [{"role": "user", "content": "Write a Python script for Fibonacci sequence."}],
     
-    # 2. CULTURE G : Test de précision factuelle (Noms, dates, lieux)
-    [{"role": "user", "content": "Which city is the capital of Australia?"}],
+    # # 2. CULTURE G : Test de précision factuelle (Noms, dates, lieux)
+    # [{"role": "user", "content": "Which city is the capital of Australia?"}],
     
     # 3. HISTOIRE : Test de créativité et de cohérence narrative (longue traîne)
     [{"role": "user", "content": "Write a short story about an astronaut"}]

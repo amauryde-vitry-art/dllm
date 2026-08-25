@@ -556,9 +556,6 @@ class DiffusionGemmaSamplerWithCompleteHistory(BaseSampler):
                     )
                     processed_logits = processed_logits / temperature
                 probs = torch.softmax(processed_logits, dim=-1, dtype=torch.float32)
-
-                denoiser_canvas = torch.multinomial(probs.view(-1, vocab_size), num_samples=1)
-                denoiser_canvas = denoiser_canvas.squeeze(-1).view(batch_size, canvas_length)
                 new_argmax_canvas = torch.argmax(processed_logits, dim=-1)
 
                 # Entropy and confidence per token
