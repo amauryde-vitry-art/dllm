@@ -4,6 +4,7 @@ import json
 import argparse
 import subprocess
 import tempfile
+import shutil
 import traceback
 import time
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
@@ -111,13 +112,25 @@ def _run_gpu_baseline(bl_key, config_name, nproc):
     # Absolute project root
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-    # Extra args per baseline
-    extra_args = ""
-    if bl_key in ("semantic_entropy", "lexical_similarity"):
-        extra_args = ", n_variants=5"
+    # semantic_entropy.run_config() needs a pre-loaded generation backend + NLI
+    # pipeline + rank/world_size/local_rank that only its own CLI (main()) builds --
+    # a bare `run_config(config_name)` call is missing 7 required positional args.
+    # So for this baseline we drive its actual CLI as the torchrun target and read
+    # back the JSON file its main() writes, instead of importing run_config directly.
+    is_semantic_entropy = bl_key == "semantic_entropy"
+    out_dir = None
+    script_cmd_args = []
 
-    # Write a launcher script to a temp file
-    script_content = f"""\
+    if is_semantic_entropy:
+        script_path = os.path.join(project_root, "PipelineTest", "Benchmark", "semantic_entropy.py")
+        out_dir = tempfile.mkdtemp(prefix=f"bench_{bl_key}_out_")
+        script_cmd_args = ["--config", config_name, "--n_variants", "5", "--output_dir", out_dir]
+    else:
+        # Extra args per baseline
+        extra_args = ", n_variants=5" if bl_key == "lexical_similarity" else ""
+
+        # Write a launcher script to a temp file
+        script_content = f"""\
 import sys, os, json
 sys.path.insert(0, "{project_root}")
 
@@ -141,12 +154,12 @@ if rank == 0 and result is not None:
     print(f"[RESULT_SAVED] {{out_path}}")
 """
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", prefix=f"bench_{bl_key}_",
-        dir="/tmp", delete=False
-    ) as f:
-        f.write(script_content)
-        script_path = f.name
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", prefix=f"bench_{bl_key}_",
+            dir="/tmp", delete=False
+        ) as f:
+            f.write(script_content)
+            script_path = f.name
 
     try:
         python_exe = _resolve_python()
@@ -160,7 +173,7 @@ if rank == 0 and result is not None:
             f"--nproc_per_node={nproc}",
             f"--master_port={random_port}",
             script_path,
-        ]
+        ] + script_cmd_args
 
         # Validation et affichage du GPU actif
         import torch
@@ -199,6 +212,18 @@ if rank == 0 and result is not None:
             print(f"    [ERROR] torchrun failed (rc={proc.returncode})")
             return None
 
+        if is_semantic_entropy:
+            # semantic_entropy.main() names the file after CONFIGS[config_name]["name"]
+            # (single-config run) and keys the JSON dict by config_name.
+            cfg_display_name = CONFIGS[config_name]["name"]
+            result_path = os.path.join(out_dir, f"semantic_entropy_results_{cfg_display_name}_debertav1.json")
+            if os.path.exists(result_path):
+                with open(result_path, "r") as f:
+                    results_by_config = json.load(f)
+                return results_by_config.get(config_name)
+            print(f"    [WARN] No result file found at {result_path}")
+            return None
+
         # Read result from temp file
         result_path = f"/tmp/benchmark_gpu_results/{bl_key}_{config_name}.json"
         if os.path.exists(result_path):
@@ -211,7 +236,10 @@ if rank == 0 and result is not None:
         return None
 
     finally:
-        if os.path.exists(script_path):
+        if is_semantic_entropy:
+            if out_dir is not None:
+                shutil.rmtree(out_dir, ignore_errors=True)
+        elif os.path.exists(script_path):
             os.remove(script_path)
 
 # ---------------------------------------------------------------------------
