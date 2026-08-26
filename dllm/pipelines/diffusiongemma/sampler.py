@@ -87,8 +87,16 @@ class DiffusionGemmaSampler(BaseSampler):
         )
         attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
         for i, tensor in enumerate(tensors):
-            input_ids[i, : tensor.numel()] = tensor.reshape(-1)
-            attention_mask[i, : tensor.numel()] = True
+            # Left-pad: right-align each prompt so the last real prompt token
+            # sits at the same column for every row in the batch. This is
+            # required so that generated (canvas) tokens are always adjacent
+            # (RoPE distance 1) to each sample's real last prompt token,
+            # regardless of how much shorter it is than the batch's longest
+            # prompt. Right-padding here would inflate that distance for
+            # shorter prompts and corrupt the start of their generation.
+            n = tensor.numel()
+            input_ids[i, max_prompt_len - n:] = tensor.reshape(-1)
+            attention_mask[i, max_prompt_len - n:] = True
 
         batch_size = input_ids.shape[0]
         max_new_tokens = config.max_new_tokens
@@ -114,17 +122,14 @@ class DiffusionGemmaSampler(BaseSampler):
             cache_kwargs["config"] = model_config
         past_key_values = DynamicCache(**cache_kwargs)
 
-        encoder_position_ids = torch.arange(
-            cur_len - input_ids.shape[1],
-            cur_len,
-            dtype=torch.int32,
-            device=input_ids.device,
-        ).unsqueeze(0)
-        decoder_position_ids = torch.arange(
-            cur_len,
-            cur_len + canvas_length,
-            dtype=torch.int32,
-            device=input_ids.device,
+        # Per-row real position ids: left-padded columns get position 0
+        # (irrelevant, masked out by attention_mask); real prompt tokens get
+        # their true 0-indexed position regardless of how much left padding
+        # precedes them.
+        encoder_position_ids = (attention_mask.long().cumsum(-1) - 1).clamp(min=0).to(torch.int32)
+        prompt_lens_tensor = attention_mask.sum(dim=-1).to(torch.int32)
+        decoder_position_ids = prompt_lens_tensor.unsqueeze(1) + torch.arange(
+            canvas_length, dtype=torch.int32, device=device,
         ).unsqueeze(0)
 
         entropy_bound = float(config.entropy_bound)
@@ -283,13 +288,11 @@ class DiffusionGemmaSampler(BaseSampler):
             cur_len += canvas_length
             attention_mask = torch.nn.functional.pad(attention_mask, (0, canvas_length), value=True)
             decoder_attention_mask = torch.nn.functional.pad(decoder_attention_mask, (0, canvas_length), value=True)
+            # Positions are per-row (rows differ in real prompt length), so
+            # shift each row's own previous canvas positions forward instead
+            # of rebuilding a single arange shared across the batch.
             encoder_position_ids = decoder_position_ids
-            decoder_position_ids = torch.arange(
-                cur_len,
-                cur_len + canvas_length,
-                dtype=torch.int32,
-                device=decoder_position_ids.device,
-            ).unsqueeze(0)
+            decoder_position_ids = encoder_position_ids + canvas_length
 
         new_tokens = input_ids[:, initial_input_ids_len:]
         if pad_token_id is not None:
@@ -440,8 +443,12 @@ class DiffusionGemmaSamplerWithCompleteHistory(BaseSampler):
         )
         attention_mask = torch.zeros_like(input_ids, dtype=torch.bool)
         for i, tensor in enumerate(tensors):
-            input_ids[i, : tensor.numel()] = tensor.reshape(-1)
-            attention_mask[i, : tensor.numel()] = True
+            # Left-pad: right-align each prompt so the last real prompt token
+            # sits at the same column for every row in the batch (see
+            # DiffusionGemmaSampler.sample for the full rationale).
+            n = tensor.numel()
+            input_ids[i, max_prompt_len - n:] = tensor.reshape(-1)
+            attention_mask[i, max_prompt_len - n:] = True
 
         batch_size = input_ids.shape[0]
         max_new_tokens = config.max_new_tokens
@@ -449,7 +456,6 @@ class DiffusionGemmaSamplerWithCompleteHistory(BaseSampler):
         attention_mask = attention_mask.bool()
 
         cur_len = input_ids.shape[1]
-        prompt_lens = [t.numel() for t in tensors]
         initial_input_ids_len = cur_len
         max_new_canvases = math.ceil(max_new_tokens / canvas_length)
 
@@ -463,11 +469,14 @@ class DiffusionGemmaSamplerWithCompleteHistory(BaseSampler):
             cache_kwargs["config"] = model_config
         past_key_values = DynamicCache(**cache_kwargs)
 
-        encoder_position_ids = torch.arange(
-            cur_len - input_ids.shape[1], cur_len, dtype=torch.int32, device=device,
-        ).unsqueeze(0)
-        decoder_position_ids = torch.arange(
-            cur_len, cur_len + canvas_length, dtype=torch.int32, device=device,
+        # Per-row real position ids (see DiffusionGemmaSampler.sample): left
+        # padding means the absolute column of "generation start" is the same
+        # (initial_input_ids_len) for every row, but each row's true prompt
+        # length differs, so RoPE positions must be computed per row.
+        encoder_position_ids = (attention_mask.long().cumsum(-1) - 1).clamp(min=0).to(torch.int32)
+        prompt_lens_tensor = attention_mask.sum(dim=-1).to(torch.int32)
+        decoder_position_ids = prompt_lens_tensor.unsqueeze(1) + torch.arange(
+            canvas_length, dtype=torch.int32, device=device,
         ).unsqueeze(0)
 
         entropy_bound = float(config.entropy_bound)
@@ -642,10 +651,10 @@ class DiffusionGemmaSamplerWithCompleteHistory(BaseSampler):
             cur_len += canvas_length
             attention_mask = torch.nn.functional.pad(attention_mask, (0, canvas_length), value=True)
             decoder_attention_mask = torch.nn.functional.pad(decoder_attention_mask, (0, canvas_length), value=True)
+            # Per-row positions: shift each row's own previous canvas
+            # positions forward rather than rebuilding a batch-shared arange.
             encoder_position_ids = decoder_position_ids
-            decoder_position_ids = torch.arange(
-                cur_len, cur_len + canvas_length, dtype=torch.int32, device=device,
-            ).unsqueeze(0)
+            decoder_position_ids = encoder_position_ids + canvas_length
 
         if not return_dict:
             return input_ids
@@ -660,7 +669,14 @@ class DiffusionGemmaSamplerWithCompleteHistory(BaseSampler):
             histories_accepted= histories_accepted,
             step_per_block=config.steps,
             block_size=canvas_length,
-            start_idx_history=prompt_lens,
+            # With left-padding, generation always starts at the same
+            # absolute column (initial_input_ids_len) for every row in the
+            # batch, regardless of each sample's real prompt length -- unlike
+            # `prompt_lens`, which was wrong for any batch with mixed-length
+            # prompts (history tensors are indexed by absolute column, see
+            # the `full_len`/slicing above and dllm/pipelines/dream/sampler.py
+            # for the analogous constant-offset convention).
+            start_idx_history=[initial_input_ids_len] * batch_size,
             max_new_tokens=max_new_tokens,
             attention_mask=attention_mask,
         )

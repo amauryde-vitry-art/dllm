@@ -9,7 +9,6 @@ import random
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from GenerateBaseSamplerOutputsAndExtractInfo.GetInfoFromBaseSamplerOutput import getEachStepGeneratedSequence
-
 import torch
 import json
 import transformers
@@ -26,7 +25,18 @@ DATASET_LOADERS = {
     "hotpotqa": load_hotpotqa,
 }
 
+BRIEF_SUFFIX = " please answer briefly"
 
+def _apply_brief_suffix(messages):
+    """Ajoute BRIEF_SUFFIX à la fin de chaque message utilisateur."""
+    new_messages = []
+    for convo in messages:
+        new_convo = [
+            {**msg, "content": msg["content"] + BRIEF_SUFFIX} if msg.get("role") == "user" else msg
+            for msg in convo
+        ]
+        new_messages.append(new_convo)
+    return new_messages
 
 @dataclass
 class SamplerConfig(dllm.core.samplers.MDLMSamplerConfig):
@@ -174,7 +184,9 @@ def _run_batches_for_group(
         outputs.sample_indices = torch.tensor(batch_local_indices, dtype=torch.long)
 
         batch_answers = dllm.utils.sample_trim(tokenizer, outputs.sequences.tolist(), inputs)
+        # print(getEachStepGeneratedSequence(outputs, tokenizer))
         for local_idx, label_entry, answer in zip(batch_local_indices, batch_labels, batch_answers):
+            print(answer)
             local_results.append({
                 "question": label_entry["question"],
                 "label": label_entry["label"],
@@ -267,8 +279,10 @@ def SampleAnswers(
 
         load_fn = DATASET_LOADERS[dataset]
         messages, labels = load_fn(num_samples=num_sample, seed=data_seed)
-        print(f"[rank {rank}] Loaded dataset with {len(messages)} samples (data_seed={data_seed}).", flush=True)
 
+        messages = _apply_brief_suffix(messages)
+        print(f"[rank {rank}] Loaded dataset with {len(messages)} samples (data_seed={data_seed}).", flush=True)
+        print(messages[0], flush=True)
         # --- Global (pre-shard) low/high temperature split ---
         # Splitting BEFORE sharding, with a fixed seed shared across ranks,
         # guarantees every rank agrees on which global index belongs to which
