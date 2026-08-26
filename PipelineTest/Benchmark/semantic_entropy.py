@@ -20,6 +20,7 @@ def _gpu_mem_str(local_rank):
     return f"{alloc:.1f}GiB alloc / {reserved:.1f}GiB reserved / {total:.1f}GiB total"
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 import dllm
+from dllm.pipelines.diffusiongemma.sampler import DiffusionGemmaSamplerWithCompleteHistory, DiffusionGemmaSamplerConfig
 from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score
 from PipelineTest.scripts.run_evaluation import CONFIGS
 from PipelineTest.Benchmark.data_split import load_eval_data, get_train_test_split
@@ -45,14 +46,50 @@ class DreamSamplerConfig(dllm.pipelines.dream.DreamSamplerConfig):
     temperature: float = 0.5
 
 @dataclass
+class GemmaSamplerConfig(DiffusionGemmaSamplerConfig):
+    # Mirrors PipelineTest/sampling/sample_answers.py's GemmaSamplerConfig: no
+    # temperature schedule (the sampler already samples stochastically via
+    # multinomial, which is what gives us distinct variants for N>1).
+    max_new_tokens: int = 64
+    steps: int = 64
+    max_temperature: float = None
+    min_temperature: float = None
+    return_dict: bool = True
+    canvas_length: int = 64
+
+@dataclass
 class ScriptArguments:
     model_name_or_path: str = "GSAI-ML/LLaDA-8B-Instruct"
     seed: int = 42
     visualize: bool = False
 
 
+def _build_gemma_device_map(gpu_offset: int) -> dict:
+    """Explicit encoder/decoder device_map for DiffusionGemma (26B-A4B), which
+    does not fit on a single GPU: half of its 30 layers go on `gpu_offset`,
+    the other half on `gpu_offset + 1`. Mirrors the manual split in
+    PipelineTest/sampling/sample_answers.py, generalized to a per-rank GPU
+    pair instead of a hardcoded GPU 0/1."""
+    lo, hi = gpu_offset, gpu_offset + 1
+    device_map = {
+        "model.encoder.language_model.embed_tokens": lo,
+        "model.decoder.embed_tokens": lo,
+        "model.encoder.vision_tower": lo,
+        "model.encoder.embed_vision": lo,
+        "model.decoder.self_conditioning": lo,
+        "lm_head": lo,
+        "model.encoder.language_model.norm": hi,
+        "model.decoder.norm": hi,
+    }
+    for i in range(30):
+        gpu = lo if i < 15 else hi
+        device_map[f"model.encoder.language_model.layers.{i}"] = gpu
+        device_map[f"model.decoder.layers.{i}"] = gpu
+    return device_map
+
+
 # Registre model_type -> chemin du checkpoint, classe sampler, factory de SamplerConfig.
-# Le chargement des poids ne dépend QUE de model_type (llada/dream), jamais de
+# Le chargement des poids ne dépend QUE de model_type (llada/dream/gemma), jamais de
 # steps/max_new_tokens/block_size : ces derniers ne sont que des paramètres passés à
 # sampler.sample(...), pas des propriétés du modèle chargé.
 MODEL_REGISTRY = {
@@ -70,11 +107,30 @@ MODEL_REGISTRY = {
             steps=steps, max_new_tokens=tokens, temperature=0.5
         ),
     },
+    "gemma": {
+        # Not resolved through BASE_MODELS_DIR (see load_generation_backend):
+        # unlike llada/dream, this checkpoint isn't mirrored locally.
+        "model_path": "google/diffusiongemma-26B-A4B-it",
+        # Uses the confidence-based top-k unmasking scheduler (mirrors
+        # LLaDA/MDLM's low-confidence remasking) instead of the plain
+        # DiffusionGemmaSampler's entropy-bound + multinomial acceptance --
+        # a different sampling algorithm, requested explicitly for this
+        # benchmark's generation. Its per-step history tensors are dropped
+        # right after each batch below (`del outputs`), so they don't
+        # accumulate across batches like in sample_answers_all_configs.py.
+        "sampler_cls": DiffusionGemmaSamplerWithCompleteHistory,
+        "make_sampler_config": lambda steps, tokens: GemmaSamplerConfig(
+            steps=steps, max_new_tokens=tokens, canvas_length=tokens,
+        ),
+    },
 }
 
 
 def get_model_type(config_name: str) -> str:
-    return "dream" if "dream" in config_name.lower() else "llada"
+    name = config_name.lower()
+    if "gemma" in name:
+        return "gemma"
+    return "dream" if "dream" in name else "llada"
 
 
 # =========================================================================
@@ -106,9 +162,32 @@ def load_generation_backend(model_type: str, local_rank: int, rank: int):
     A appeler une seule fois par model_type (pas une fois par config)."""
     model_type = model_type.lower()
     if model_type not in MODEL_REGISTRY:
-        raise ValueError("model_type doit être 'llada' ou 'dream'")
+        raise ValueError("model_type doit être 'llada', 'dream' ou 'gemma'")
 
     entry = MODEL_REGISTRY[model_type]
+
+    if model_type == "gemma":
+        # DiffusionGemma (26B-A4B) doesn't fit on a single GPU: split its
+        # encoder/decoder explicitly across 2 physical GPUs per rank (instead
+        # of the single-GPU device_map dllm.utils.get_model() would use), and
+        # skip BASE_MODELS_DIR resolution since this checkpoint isn't mirrored
+        # locally like llada/dream (see PipelineTest/sampling/sample_answers.py).
+        from transformers import DiffusionGemmaForBlockDiffusion
+        model_path = entry["model_path"]
+        gpu_offset = local_rank * 2
+        device_map = _build_gemma_device_map(gpu_offset)
+        print(f"[rank {rank}] Loading generation model (gemma): {model_path} "
+              f"(device_map split across cuda:{gpu_offset} & cuda:{gpu_offset + 1})...", flush=True)
+        model = DiffusionGemmaForBlockDiffusion.from_pretrained(
+            model_path, torch_dtype=torch.bfloat16, device_map=device_map,
+        ).eval()
+        tokenizer = dllm.utils.get_tokenizer(model_name_or_path=model_path)
+        sampler = entry["sampler_cls"](model=model, tokenizer=tokenizer)
+        if torch.cuda.is_available():
+            print(f"[rank {rank}] Generation model (gemma) resident on cuda:{gpu_offset}+cuda:{gpu_offset + 1} "
+                  f"| {_gpu_mem_str(gpu_offset)} / {_gpu_mem_str(gpu_offset + 1)}", flush=True)
+        return model, tokenizer, sampler, entry["make_sampler_config"]
+
     resolved_path = dllm.utils.resolve_with_base_env(entry["model_path"], "BASE_MODELS_DIR")
     print(f"[rank {rank}] Loading generation model ({model_type}): {resolved_path}...", flush=True)
     model = dllm.utils.get_model(
@@ -174,7 +253,7 @@ def _build_nli_pipeline(local_rank):
 # large plutôt que de le repayer N fois).
 # =========================================================================
 def generate_variants(tokenizer, sampler, sampler_config, messages: list, N: int, gen_batch_size: int = 16,
-                       rank: int = 0, log_every: int = 10):
+                       rank: int = 0, log_every: int = 10, is_gemma: bool = False):
     """Génère N variantes stochastiques pour chaque message."""
     results = {msg[0]['content']: [] for msg in messages}
 
@@ -196,7 +275,22 @@ def generate_variants(tokenizer, sampler, sampler_config, messages: list, N: int
             batch_messages = expanded_messages[start_idx:end_idx]
             batch_keys = expanded_keys[start_idx:end_idx]
 
-            inputs = tokenizer.apply_chat_template(batch_messages, add_generation_prompt=True, tokenize=True)
+            if is_gemma:
+                # DiffusionGemma's AutoProcessor-based tokenizer doesn't support
+                # apply_chat_template(..., tokenize=True) in batch mode: format
+                # to text then encode per-sample (mirrors
+                # PipelineTest/sampling/sample_answers.py). The sampler itself
+                # left-pads these variable-length prompts internally.
+                formatted_prompts = [
+                    tokenizer.apply_chat_template(msg, add_generation_prompt=True, tokenize=False)
+                    for msg in batch_messages
+                ]
+                inputs = [
+                    tokenizer.encode(p, return_tensors="pt").squeeze(0)
+                    for p in formatted_prompts
+                ]
+            else:
+                inputs = tokenizer.apply_chat_template(batch_messages, add_generation_prompt=True, tokenize=True)
             outputs = sampler.sample(inputs, sampler_config, return_dict=True)
             flat_sequences = dllm.utils.sample_trim(tokenizer, outputs.sequences.tolist(), inputs)
 
@@ -325,7 +419,7 @@ def calculate_semantic_entropy_nli(dict_results, pipeline_nli, nli_batch_size=64
 def generate_and_evaluate_nli_parallel(tokenizer, sampler, sampler_config, nli_pipeline,
                                         messages: list, N: int, rank: int, world_size: int,
                                         local_rank: int, seed: int = 42, gen_batch_size: int = 8,
-                                        nli_batch_size: int = 64):
+                                        nli_batch_size: int = 64, is_gemma: bool = False):
     """Génère N variantes stochastiques ET calcule l'entropie sémantique par NLI."""
 
     if seed is not None:
@@ -339,7 +433,7 @@ def generate_and_evaluate_nli_parallel(tokenizer, sampler, sampler_config, nli_p
 
     # 1. Génération des variantes (batchée sur prompts x variantes)
     shard_results = generate_variants(tokenizer, sampler, sampler_config, shard_messages, N,
-                                       gen_batch_size=gen_batch_size, rank=rank)
+                                       gen_batch_size=gen_batch_size, rank=rank, is_gemma=is_gemma)
     print(f"[rank {rank}] Gen phase done at t={time.time():.0f} "
           f"(+{time.time() - t_shard_start:.1f}s since shard start)", flush=True)
 
@@ -448,6 +542,7 @@ def run_config(config_name, tokenizer, sampler, make_sampler_config, nli_pipelin
         seed=42,
         gen_batch_size=gen_batch_size,
         nli_batch_size=nli_batch_size,
+        is_gemma=(get_model_type(config_name) == "gemma"),
     )
 
     if rank != 0:
