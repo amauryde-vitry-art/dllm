@@ -107,7 +107,7 @@ GEMMA_CONFIGS = [
     {"max_new_tokens": 64, "steps": 32, "canvas_length": 64, "brief": True},
     {"max_new_tokens": 32, "steps": 32, "canvas_length": 32, "brief": True},
     {"max_new_tokens": 64, "steps": 64, "canvas_length": 64, "brief": True},
-    {"max_new_tokens": 256, "steps": 128, "canvas_length": 256, "brief": False},
+    # {"max_new_tokens": 256, "steps": 128, "canvas_length": 256, "brief": False},
 ]
 
 BRIEF_SUFFIX = " please answer briefly"

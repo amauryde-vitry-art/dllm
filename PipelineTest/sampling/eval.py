@@ -464,7 +464,7 @@ def extract_batch_answer(text: str, expected_count: int) -> list[dict] | None:
 def main():
     os.makedirs(SAVE_PATH, exist_ok=True)
 
-    json_files = [f for f in os.listdir(TO_EVAL_PATH) if f.endswith(".json")]
+    json_files = [f for f in os.listdir(TO_EVAL_PATH) if f.endswith(".json") and "diffgemma" in f]
     if not json_files:
         print(f"[eval] No JSON files found in {TO_EVAL_PATH}", flush=True)
         return
