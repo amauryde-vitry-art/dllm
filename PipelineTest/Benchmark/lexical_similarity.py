@@ -8,6 +8,17 @@ import torch
 import torch.distributed as dist
 import transformers
 from dataclasses import dataclass
+import time
+
+
+def _gpu_mem_str(local_rank):
+    """Résumé mémoire GPU courant (alloué/réservé/total) pour vérifier la charge réelle."""
+    if not torch.cuda.is_available() or local_rank < 0:
+        return "cpu"
+    alloc = torch.cuda.memory_allocated(local_rank) / 1024**3
+    reserved = torch.cuda.memory_reserved(local_rank) / 1024**3
+    total = torch.cuda.get_device_properties(local_rank).total_memory / 1024**3
+    return f"{alloc:.1f}GiB alloc / {reserved:.1f}GiB reserved / {total:.1f}GiB total"
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 import dllm
@@ -178,12 +189,22 @@ def generate_variants_parallel(model_type: str, generation_steps: int, max_new_t
     ).eval()
     tokenizer = dllm.utils.get_tokenizer(model_name_or_path=resolved_path)
     sampler = sampler_cls(model=model, tokenizer=tokenizer)
+    if torch.cuda.is_available():
+        dev_name = torch.cuda.get_device_name(local_rank)
+        print(f"[rank {rank}] Generation model ({model_type}) resident on cuda:{local_rank} "
+              f"({dev_name}) | {_gpu_mem_str(local_rank)}", flush=True)
 
     shard_indices = list(range(rank, len(messages), world_size))
     shard_messages = [messages[i] for i in shard_indices]
-    print(f"[rank {rank}/{world_size}] Assigned {len(shard_messages)} prompts for Stochastic Generation", flush=True)
+    t_shard_start = time.time()
+    print(f"[rank {rank}/{world_size}] Assigned {len(shard_messages)} prompts for Stochastic Generation "
+          f"(t={t_shard_start:.0f})", flush=True)
 
     shard_results = {msg[0]['content']: [] for msg in shard_messages}
+
+    n_batches_per_variant = (len(shard_messages) + batch_size - 1) // max(batch_size, 1)
+    total_batches = n_batches_per_variant * N
+    batch_counter = 0
 
     # Échantillonnage de N variantes stochastiques indépendantes
     for v in range(N):
@@ -197,6 +218,22 @@ def generate_variants_parallel(model_type: str, generation_steps: int, max_new_t
 
             for idx, msg in enumerate(batch_messages):
                 shard_results[msg[0]['content']].append(flat_sequences[idx])
+
+            del outputs, flat_sequences
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            batch_counter += 1
+            if batch_counter % 10 == 0 or batch_counter == total_batches:
+                elapsed = time.time() - t_shard_start
+                rate = batch_counter / elapsed if elapsed > 0 else 0.0
+                eta = (total_batches - batch_counter) / rate if rate > 0 else float("inf")
+                print(f"  [rank {rank}] gen batch {batch_counter}/{total_batches} "
+                      f"(variant {v + 1}/{N}, {elapsed:.1f}s elapsed, {rate:.2f} batch/s, ETA {eta:.0f}s) | "
+                      f"{_gpu_mem_str(local_rank)}", flush=True)
+
+    print(f"[rank {rank}] Gen phase done at t={time.time():.0f} "
+          f"(+{time.time() - t_shard_start:.1f}s since shard start)", flush=True)
 
     del model, sampler
     if torch.cuda.is_available():
@@ -231,8 +268,13 @@ def generate_variants_parallel(model_type: str, generation_steps: int, max_new_t
 # =========================================================================
 # CLASSIFIEUR LOGISTIC REGRESSION (GridSearchCV)
 # =========================================================================
-def evaluate_classifier(features, labels, train_idx, test_idx, name="LexicalSimilarity"):
-    """Entraîne une régression logistique sur le train_idx et évalue sur le test_idx."""
+def evaluate_classifier(features, labels, train_idx, test_idx, name="LexicalSimilarity", full_X=None):
+    """Entraîne une régression logistique sur le train_idx et évalue sur le test_idx.
+
+    If `full_X` is given, the fitted model also scores every one of its rows
+    (train+test) and the per-sample probabilities are returned as
+    "sample_scores", aligned positionally with `full_X`.
+    """
     pipe = SkPipeline([
         ("scaler", StandardScaler()),
         ("logreg", LogisticRegression(max_iter=10000, random_state=42)),
@@ -266,7 +308,7 @@ def evaluate_classifier(features, labels, train_idx, test_idx, name="LexicalSimi
     cm = confusion_matrix(y_test, y_pred)
     tn, fp, fn, tp = cm.ravel()
 
-    return {
+    result = {
         "name": name,
         "test_roc_auc": float(roc_auc),
         "test_pr_auc": float(pr_auc),
@@ -276,6 +318,12 @@ def evaluate_classifier(features, labels, train_idx, test_idx, name="LexicalSimi
         "n_samples": len(y_test),
         "confusion_matrix": {"TN": int(tn), "FP": int(fp), "FN": int(fn), "TP": int(tp)}
     }
+
+    if full_X is not None:
+        full_scores = best.predict_proba(full_X)[:, 1]
+        result["sample_scores"] = [float(s) for s in full_scores]
+
+    return result
 
 
 # =========================================================================
@@ -335,7 +383,7 @@ def run_config(config_name, n_variants=5, balance_seed=42):
     print(f"  Mean MaxRougeLF1: {features[:, 0].mean():.4f} "
           f"(halluc: {features[labels_balanced == 1, 0].mean():.4f} | correct: {features[labels_balanced == 0, 0].mean():.4f})")
 
-    results = evaluate_classifier(features, labels_balanced, train_idx, test_idx, name=f"LexicalSimilarity_{config_name}")
+    results = evaluate_classifier(features, labels_balanced, train_idx, test_idx, name=f"LexicalSimilarity_{config_name}", full_X=features)
 
     # Logs de traçabilité des index pour vérification
     question_ids_train = indices_balanced[train_idx].tolist()
@@ -345,10 +393,23 @@ def run_config(config_name, n_variants=5, balance_seed=42):
     print("="*50)
     print(question_ids_test[:20], "... (truncated)" if len(question_ids_test) > 20 else "")
 
+    # Per-sample values (train+test), keyed by original sample index, for
+    # downstream per-sample CSV export (Benchmark/main.py).
+    split_of_pos = np.array(["train"] * len(labels_balanced))
+    split_of_pos[test_idx] = "test"
+    samples = {}
+    for pos, idx in enumerate(indices_balanced):
+        samples[int(idx)] = {
+            "label_hallucination": int(labels_balanced[pos]),
+            "split": str(split_of_pos[pos]),
+            "lexical_similarity": results["sample_scores"][pos],
+        }
+
     results.update({
         "config": config_name,
         "n_collapse_dropped": 0,
         "n_balanced_pool": len(labels_balanced),
+        "samples": samples,
     })
 
     print(f"  ROC-AUC: {results['test_roc_auc']:.4f}  |  PR-AUC: {results['test_pr_auc']:.4f}")

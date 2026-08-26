@@ -1,11 +1,14 @@
 import sys
 import os
+import csv
 import json
 import argparse
 import subprocess
 import tempfile
+import shutil
 import traceback
-
+import time
+import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from PipelineTest.scripts.run_evaluation import CONFIGS
@@ -73,31 +76,133 @@ def _import_func(module_path, func_name):
     return getattr(mod, func_name)
 
 
+def _pos_neg_counts(sub_result):
+    """Extract (n_pos, n_neg) of the scored (test) set from a metrics dict, trying
+    the various field names used across baseline scripts."""
+    if "n_halluc" in sub_result and "n_correct" in sub_result:
+        return sub_result["n_halluc"], sub_result["n_correct"]
+    if "confusion_matrix" in sub_result:
+        cm = sub_result["confusion_matrix"]
+        return cm.get("TP", 0) + cm.get("FN", 0), cm.get("TN", 0) + cm.get("FP", 0)
+    if "test_pos_rate" in sub_result:
+        n = sub_result.get("n_test") or sub_result.get("n_samples")
+        if n:
+            n_pos = int(round(sub_result["test_pos_rate"] * n))
+            return n_pos, n - n_pos
+    return None, None
+
+
+def _auroc_se(roc_auc, n_pos, n_neg):
+    """Hanley & McNeil (1982) standard error of an AUROC estimate, from the
+    positive/negative counts of the scored set. Returns None if not computable."""
+    if roc_auc is None or not n_pos or not n_neg:
+        return None
+    auc = float(roc_auc)
+    q1 = auc / (2 - auc)
+    q0 = (2 * auc ** 2) / (1 + auc)
+    var = (auc * (1 - auc) + (n_pos - 1) * (q1 - auc ** 2) + (n_neg - 1) * (q0 - auc ** 2)) / (n_pos * n_neg)
+    return float(np.sqrt(max(var, 0.0)))
+
+
 def _extract_metrics(result, baseline_key):
     """
-    Normalize baseline results into {roc_auc, pr_auc}.
+    Normalize baseline results into {roc_auc, pr_auc, roc_auc_se}.
     Handles both flat dicts and nested (Baseline_and_markovian_features) results.
+    roc_auc_se is the Hanley-McNeil standard error of the AUROC estimate (our
+    uncertainty on the AUROC), computed from the pos/neg counts of the scored set.
     """
     if result is None:
         return None
 
     if "test_roc_auc" in result and "test_pr_auc" in result:
+        n_pos, n_neg = _pos_neg_counts(result)
         return {
             "roc_auc": result["test_roc_auc"],
             "pr_auc": result["test_pr_auc"],
             "n_samples": result.get("n_samples") or result.get("n_test"),
+            "roc_auc_se": _auroc_se(result["test_roc_auc"], n_pos, n_neg),
         }
 
     if "results" in result:
         nested = {}
         for sub_name, sub in result["results"].items():
+            n_pos, n_neg = _pos_neg_counts(sub)
             nested[sub_name] = {
                 "roc_auc": sub.get("test_roc_auc"),
                 "pr_auc": sub.get("test_pr_auc"),
+                "roc_auc_se": _auroc_se(sub.get("test_roc_auc"), n_pos, n_neg),
             }
         return nested
 
     return None
+
+
+def get_model_folder(config_name):
+    """Map a config name to its model sub-folder under values/ (gemma/llada/dream)."""
+    name = config_name.lower()
+    if "gemma" in name:
+        return "gemma"
+    if "dream" in name:
+        return "dream"
+    return "llada"
+
+
+# Which column(s) each baseline contributes to the per-sample CSV, read off
+# its raw result's "samples" dict (see each baseline's run_config/main()).
+SAMPLE_VALUE_COLUMNS = {
+    "semantic_entropy": ["semantic_entropy"],
+    "perplexity": ["perplexity"],
+    "ln_entropy": ["ln_entropy"],
+    "lexical_similarity": ["lexical_similarity"],
+    "baseline_markov": ["baseline", "markov", "baseline_markov"],
+}
+
+
+def _write_sample_csv(config_name, raw_results, values_dir):
+    """
+    Write one CSV per config with, for each sample, the per-sample value of
+    every baseline that exposes one (semantic entropy, perplexity, ln-entropy,
+    lexical similarity, baseline / markov / baseline+markov).
+    `raw_results` maps baseline key (as in BASELINE_REGISTRY) -> raw result dict.
+    """
+    rows = {}
+
+    for bl_key, columns in SAMPLE_VALUE_COLUMNS.items():
+        result = raw_results.get(bl_key)
+        if result is None or "samples" not in result:
+            continue
+        for idx_key, info in result["samples"].items():
+            idx = int(idx_key)
+            row = rows.setdefault(idx, {})
+            row.setdefault("label_hallucination", info.get("label_hallucination"))
+            split = info.get("split")
+            if split is None and "is_in_test_split" in info:
+                split = "test" if info["is_in_test_split"] else "train"
+            row.setdefault("split", split)
+            for col in columns:
+                row[col] = info.get(col)
+
+    if not rows:
+        return None
+
+    out_dir = os.path.join(values_dir, get_model_folder(config_name))
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{config_name}.csv")
+
+    columns = ["sample_index", "label_hallucination", "split"]
+    for bl_columns in SAMPLE_VALUE_COLUMNS.values():
+        columns.extend(bl_columns)
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=columns)
+        writer.writeheader()
+        for idx in sorted(rows.keys()):
+            row = {"sample_index": idx}
+            row.update(rows[idx])
+            writer.writerow(row)
+
+    print(f"  [CSV] Per-sample values saved to: {out_path}")
+    return out_path
 
 def _run_gpu_baseline(bl_key, config_name, nproc):
     """
@@ -111,13 +216,25 @@ def _run_gpu_baseline(bl_key, config_name, nproc):
     # Absolute project root
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-    # Extra args per baseline
-    extra_args = ""
-    if bl_key in ("semantic_entropy", "lexical_similarity"):
-        extra_args = ", n_variants=5"
+    # semantic_entropy.run_config() needs a pre-loaded generation backend + NLI
+    # pipeline + rank/world_size/local_rank that only its own CLI (main()) builds --
+    # a bare `run_config(config_name)` call is missing 7 required positional args.
+    # So for this baseline we drive its actual CLI as the torchrun target and read
+    # back the JSON file its main() writes, instead of importing run_config directly.
+    is_semantic_entropy = bl_key == "semantic_entropy"
+    out_dir = None
+    script_cmd_args = []
 
-    # Write a launcher script to a temp file
-    script_content = f"""\
+    if is_semantic_entropy:
+        script_path = os.path.join(project_root, "PipelineTest", "Benchmark", "semantic_entropy.py")
+        out_dir = tempfile.mkdtemp(prefix=f"bench_{bl_key}_out_")
+        script_cmd_args = ["--config", config_name, "--n_variants", "5", "--output_dir", out_dir]
+    else:
+        # Extra args per baseline
+        extra_args = ", n_variants=5" if bl_key == "lexical_similarity" else ""
+
+        # Write a launcher script to a temp file
+        script_content = f"""\
 import sys, os, json
 sys.path.insert(0, "{project_root}")
 
@@ -141,12 +258,12 @@ if rank == 0 and result is not None:
     print(f"[RESULT_SAVED] {{out_path}}")
 """
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", prefix=f"bench_{bl_key}_",
-        dir="/tmp", delete=False
-    ) as f:
-        f.write(script_content)
-        script_path = f.name
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", prefix=f"bench_{bl_key}_",
+            dir="/tmp", delete=False
+        ) as f:
+            f.write(script_content)
+            script_path = f.name
 
     try:
         python_exe = _resolve_python()
@@ -160,7 +277,7 @@ if rank == 0 and result is not None:
             f"--nproc_per_node={nproc}",
             f"--master_port={random_port}",
             script_path,
-        ]
+        ] + script_cmd_args
 
         # Validation et affichage du GPU actif
         import torch
@@ -177,6 +294,10 @@ if rank == 0 and result is not None:
         # Cela oblige le processus enfant à cracher ses logs immédiatement dans le pipe
         env_unbuffered = os.environ.copy()
         env_unbuffered["PYTHONUNBUFFERED"] = "1"
+        # Reduit la fragmentation de l'allocateur CUDA (cf. torch.OutOfMemoryError
+        # observe malgre de la VRAM "libre" mais reservee/fragmentee par les gros
+        # tenseurs temporaires du sampler MDLM).
+        env_unbuffered.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
         # Utilisation de Popen pour lire le flux en temps réel
         proc = subprocess.Popen(
@@ -199,6 +320,18 @@ if rank == 0 and result is not None:
             print(f"    [ERROR] torchrun failed (rc={proc.returncode})")
             return None
 
+        if is_semantic_entropy:
+            # semantic_entropy.main() names the file after CONFIGS[config_name]["name"]
+            # (single-config run) and keys the JSON dict by config_name.
+            cfg_display_name = CONFIGS[config_name]["name"]
+            result_path = os.path.join(out_dir, f"semantic_entropy_results_{cfg_display_name}_debertav1.json")
+            if os.path.exists(result_path):
+                with open(result_path, "r") as f:
+                    results_by_config = json.load(f)
+                return results_by_config.get(config_name)
+            print(f"    [WARN] No result file found at {result_path}")
+            return None
+
         # Read result from temp file
         result_path = f"/tmp/benchmark_gpu_results/{bl_key}_{config_name}.json"
         if os.path.exists(result_path):
@@ -211,18 +344,23 @@ if rank == 0 and result is not None:
         return None
 
     finally:
-        if os.path.exists(script_path):
+        if is_semantic_entropy:
+            if out_dir is not None:
+                shutil.rmtree(out_dir, ignore_errors=True)
+        elif os.path.exists(script_path):
             os.remove(script_path)
 
 # ---------------------------------------------------------------------------
 # Main orchestration
 # ---------------------------------------------------------------------------
 
-def run_all(config_names, baselines_to_run, include_gpu=False, nproc=2):
+def run_all(config_names, baselines_to_run, include_gpu=False, nproc=2, values_dir=None):
     """
     Run selected baselines across all configs.
     CPU baselines run in-process. GPU baselines launch via torchrun.
     Returns nested dict: {config_name: {baseline: metrics}}.
+    If `values_dir` is given, also writes a per-sample CSV per config under
+    values_dir/<gemma|llada|dream>/<config_name>.csv.
     """
     all_results = {}
 
@@ -231,6 +369,7 @@ def run_all(config_names, baselines_to_run, include_gpu=False, nproc=2):
         print(f"  CONFIG: {config_name}")
         print(f"{'#' * 70}")
         all_results[config_name] = {}
+        raw_for_csv = {bl_key: None for bl_key in SAMPLE_VALUE_COLUMNS}
 
         for bl_key in baselines_to_run:
             if bl_key not in BASELINE_REGISTRY:
@@ -243,6 +382,7 @@ def run_all(config_names, baselines_to_run, include_gpu=False, nproc=2):
 
             print(f"\n  --- Running baseline: {bl['display']} ---")
 
+            bl_t0 = time.time()
             try:
                 if bl["needs_gpu"]:
                     result = _run_gpu_baseline(bl_key, config_name, nproc)
@@ -253,16 +393,37 @@ def run_all(config_names, baselines_to_run, include_gpu=False, nproc=2):
                 print(f"  [ERROR] {bl['display']} failed for {config_name}:")
                 traceback.print_exc()
                 result = None
+            bl_t1 = time.time()
+            elapsed = bl_t1 - bl_t0
+
+            if bl_key in raw_for_csv:
+                raw_for_csv[bl_key] = result
 
             metrics = _extract_metrics(result, bl_key)
             if metrics is not None:
+                # Ajoute le timing directement dans le dict de métriques,
+                # que ce soit un dict plat (roc_auc/pr_auc) ou nested
+                # (Baseline_and_markovian_features -> plusieurs sous-résultats)
+                if "roc_auc" in metrics:
+                    metrics["elapsed_seconds"] = round(elapsed, 2)
+                else:
+                    # dict nested : on ajoute le timing global du run
+                    # (partagé par tous les sous-résultats de cette baseline)
+                    metrics["_elapsed_seconds"] = round(elapsed, 2)
+
                 all_results[config_name][bl["display"]] = metrics
                 if isinstance(metrics, dict) and "roc_auc" in metrics:
-                    print(f"  => ROC-AUC: {metrics['roc_auc']:.4f}  PR-AUC: {metrics['pr_auc']:.4f}")
+                    print(f"  => ROC-AUC: {metrics['roc_auc']:.4f}  PR-AUC: {metrics['pr_auc']:.4f}  "
+                          f"({elapsed:.1f}s)")
                 else:
-                    print(f"  => completed (see detailed output)")
+                    print(f"  => completed in {elapsed:.1f}s (see detailed output)")
             else:
-                print(f"  => no result returned")
+                # Même sans résultat exploitable, on garde une trace du temps passé
+                all_results[config_name][bl["display"]] = {"elapsed_seconds": round(elapsed, 2), "result": None}
+                print(f"  => no result returned ({elapsed:.1f}s)")
+
+        if values_dir is not None:
+            _write_sample_csv(config_name, raw_for_csv, values_dir)
 
     return all_results
 
@@ -334,6 +495,11 @@ def main():
         default=os.path.abspath(os.path.join(os.path.dirname(__file__), "eval")),
         help="Output directory for consolidated JSON"
     )
+    parser.add_argument(
+        "--values_dir", type=str,
+        default=os.path.abspath(os.path.join(os.path.dirname(__file__), "values")),
+        help="Output directory for per-sample CSVs (gemma/llada/dream subfolders)"
+    )
     args = parser.parse_args()
 
     if args.benchmarks:
@@ -375,10 +541,15 @@ def main():
             nproc_to_use = min(args.nproc, available_gpus)
             print(f"  [INFO] GPU(s) détecté(s) dans le job : {available_gpus} | nproc ajusté à : {nproc_to_use}")
 
+    # Prépare l'arborescence values/{gemma,llada,dream}/ pour les CSV par échantillon
+    for model_folder in ("gemma", "llada", "dream"):
+        os.makedirs(os.path.join(args.values_dir, model_folder), exist_ok=True)
+
     # Lancement de l'orchestration avec le bon nombre de GPU
     all_results = run_all(
         config_names, baselines_to_run,
-        include_gpu=args.include_gpu, nproc=nproc_to_use
+        include_gpu=args.include_gpu, nproc=nproc_to_use,
+        values_dir=args.values_dir,
     )
 
     os.makedirs(args.output_dir, exist_ok=True)
