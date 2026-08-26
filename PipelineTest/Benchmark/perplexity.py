@@ -153,6 +153,20 @@ def run_config(config_name, balance_seed=42):
         "correct": balance_stats["n_neg_before"],
     }
 
+    # Per-sample values (train+test), keyed by original sample index, for
+    # downstream per-sample CSV export (Benchmark/main.py).
+    split_of_pos = np.array(["train"] * len(labels))
+    split_of_pos[test_idx] = "test"
+    samples = {}
+    for pos, idx in enumerate(original_question_ids):
+        nll = nlls[pos]
+        samples[int(idx)] = {
+            "label_hallucination": int(labels[pos]),
+            "split": str(split_of_pos[pos]),
+            "perplexity": float(nll) if not np.isnan(nll) else None,
+        }
+    results["samples"] = samples
+
     print(f"  ROC-AUC: {results['test_roc_auc']:.4f}  |  PR-AUC: {results['test_pr_auc']:.4f}  |  BestAcc: {results['test_best_accuracy']:.4f}")
 
     return results

@@ -268,8 +268,13 @@ def generate_variants_parallel(model_type: str, generation_steps: int, max_new_t
 # =========================================================================
 # CLASSIFIEUR LOGISTIC REGRESSION (GridSearchCV)
 # =========================================================================
-def evaluate_classifier(features, labels, train_idx, test_idx, name="LexicalSimilarity"):
-    """Entraîne une régression logistique sur le train_idx et évalue sur le test_idx."""
+def evaluate_classifier(features, labels, train_idx, test_idx, name="LexicalSimilarity", full_X=None):
+    """Entraîne une régression logistique sur le train_idx et évalue sur le test_idx.
+
+    If `full_X` is given, the fitted model also scores every one of its rows
+    (train+test) and the per-sample probabilities are returned as
+    "sample_scores", aligned positionally with `full_X`.
+    """
     pipe = SkPipeline([
         ("scaler", StandardScaler()),
         ("logreg", LogisticRegression(max_iter=10000, random_state=42)),
@@ -303,7 +308,7 @@ def evaluate_classifier(features, labels, train_idx, test_idx, name="LexicalSimi
     cm = confusion_matrix(y_test, y_pred)
     tn, fp, fn, tp = cm.ravel()
 
-    return {
+    result = {
         "name": name,
         "test_roc_auc": float(roc_auc),
         "test_pr_auc": float(pr_auc),
@@ -313,6 +318,12 @@ def evaluate_classifier(features, labels, train_idx, test_idx, name="LexicalSimi
         "n_samples": len(y_test),
         "confusion_matrix": {"TN": int(tn), "FP": int(fp), "FN": int(fn), "TP": int(tp)}
     }
+
+    if full_X is not None:
+        full_scores = best.predict_proba(full_X)[:, 1]
+        result["sample_scores"] = [float(s) for s in full_scores]
+
+    return result
 
 
 # =========================================================================
@@ -372,7 +383,7 @@ def run_config(config_name, n_variants=5, balance_seed=42):
     print(f"  Mean MaxRougeLF1: {features[:, 0].mean():.4f} "
           f"(halluc: {features[labels_balanced == 1, 0].mean():.4f} | correct: {features[labels_balanced == 0, 0].mean():.4f})")
 
-    results = evaluate_classifier(features, labels_balanced, train_idx, test_idx, name=f"LexicalSimilarity_{config_name}")
+    results = evaluate_classifier(features, labels_balanced, train_idx, test_idx, name=f"LexicalSimilarity_{config_name}", full_X=features)
 
     # Logs de traçabilité des index pour vérification
     question_ids_train = indices_balanced[train_idx].tolist()
@@ -382,10 +393,23 @@ def run_config(config_name, n_variants=5, balance_seed=42):
     print("="*50)
     print(question_ids_test[:20], "... (truncated)" if len(question_ids_test) > 20 else "")
 
+    # Per-sample values (train+test), keyed by original sample index, for
+    # downstream per-sample CSV export (Benchmark/main.py).
+    split_of_pos = np.array(["train"] * len(labels_balanced))
+    split_of_pos[test_idx] = "test"
+    samples = {}
+    for pos, idx in enumerate(indices_balanced):
+        samples[int(idx)] = {
+            "label_hallucination": int(labels_balanced[pos]),
+            "split": str(split_of_pos[pos]),
+            "lexical_similarity": results["sample_scores"][pos],
+        }
+
     results.update({
         "config": config_name,
         "n_collapse_dropped": 0,
         "n_balanced_pool": len(labels_balanced),
+        "samples": samples,
     })
 
     print(f"  ROC-AUC: {results['test_roc_auc']:.4f}  |  PR-AUC: {results['test_pr_auc']:.4f}")

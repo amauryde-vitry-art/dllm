@@ -204,8 +204,13 @@ CONFIGS = {
 # LOGISTIC REGRESSION PIPELINE
 # =========================================================================
 
-def run_logreg(X, y, feature_names, name, train_idx=None, test_idx=None):
-    """Run GridSearchCV logistic regression, return results dict."""
+def run_logreg(X, y, feature_names, name, train_idx=None, test_idx=None, full_X=None):
+    """Run GridSearchCV logistic regression, return results dict.
+
+    If `full_X` is given, the fitted model also scores every one of its rows
+    (train+test) and the per-sample probabilities are returned as
+    "sample_scores", aligned positionally with `full_X`.
+    """
     pipe = Pipeline([
         ("scaler", StandardScaler()),
         ("logreg", LogisticRegression(max_iter=10000, random_state=42)),
@@ -262,6 +267,10 @@ def run_logreg(X, y, feature_names, name, train_idx=None, test_idx=None):
         "confusion_matrix": {"TN": int(tn), "FP": int(fp), "FN": int(fn), "TP": int(tp)},
         "coefficients": {fname: float(c) for fname, c in zip(feature_names, coefs)},
     }
+
+    if full_X is not None:
+        full_scores = best.predict_proba(full_X)[:, 1]
+        result["sample_scores"] = [float(s) for s in full_scores]
 
     print(f"  [{name}] ROC-AUC={roc:.4f}  PR-AUC={pr:.4f}  Acc={acc:.4f}  BestAcc={best_acc:.4f} (thresh={best_thresh:.2f})")
     print(f"           Best params: {grid.best_params_}")
@@ -361,15 +370,15 @@ def main(config_name="llada"):
 
     # Baseline only (on eval half)
     print("\n  === Baseline Features ===")
-    res_baseline = run_logreg(feat_baseline, labels, names_baseline, "Baseline", train_idx=train_idx, test_idx=test_idx)
+    res_baseline = run_logreg(feat_baseline, labels, names_baseline, "Baseline", train_idx=train_idx, test_idx=test_idx, full_X=feat_baseline)
 
     # Markovian only (on eval half)
     print("\n  === Markovian Features ===")
-    res_markov = run_logreg(feat_markov, labels, names_markov, "Markovian", train_idx=train_idx, test_idx=test_idx)
+    res_markov = run_logreg(feat_markov, labels, names_markov, "Markovian", train_idx=train_idx, test_idx=test_idx, full_X=feat_markov)
 
     # Baseline + Markovian
     print("\n  === Baseline + Markovian ===")
-    res_bm = run_logreg(X_base_markov, labels, names_bm, "Baseline+Markov", train_idx=train_idx, test_idx=test_idx)
+    res_bm = run_logreg(X_base_markov, labels, names_bm, "Baseline+Markov", train_idx=train_idx, test_idx=test_idx, full_X=X_base_markov)
 
 
     # Cleaned features (22 features selection)
@@ -377,6 +386,20 @@ def main(config_name="llada"):
     print("\n  === Cleaned Features (22 selection) ===")
     print(f"  Features: {names_clean}")
     res_clean = run_logreg(X_clean, labels, names_clean, "CleanedFeatures", train_idx=train_idx, test_idx=test_idx)
+
+    # Per-sample scores (train+test), keyed by original sample index, for
+    # downstream per-sample CSV export (Benchmark/main.py).
+    split_of = {int(idx): "train" for idx in indices[train_idx]}
+    split_of.update({int(idx): "test" for idx in indices[test_idx]})
+    sample_scores = {}
+    for pos, idx in enumerate(indices):
+        sample_scores[int(idx)] = {
+            "label_hallucination": int(labels[pos]),
+            "split": split_of[int(idx)],
+            "baseline": res_baseline["sample_scores"][pos],
+            "markov": res_markov["sample_scores"][pos],
+            "baseline_markov": res_bm["sample_scores"][pos],
+        }
 
     # --- SAVE ---
     save_dir = "PipelineTest/Benchmark/eval"
@@ -393,6 +416,7 @@ def main(config_name="llada"):
             "Baseline+Markov": res_bm,
             "CleanedFeatures": res_clean,
         },
+        "samples": sample_scores,
     }
 
     out_path = os.path.join(save_dir, f"Baseline_Markov_{cfg['name']}.json")

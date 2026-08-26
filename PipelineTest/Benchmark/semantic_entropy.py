@@ -391,6 +391,8 @@ def evaluate(scores, labels, name="SemanticEntropy"):
         "test_accuracy": float(acc),
         "test_best_accuracy": best_acc,
         "n_samples": len(labels),
+        "n_halluc": int(np.sum(labels == 1)),
+        "n_correct": int(np.sum(labels == 0)),
     }
 
 
